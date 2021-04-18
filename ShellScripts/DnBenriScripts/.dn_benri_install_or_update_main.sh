@@ -16,6 +16,8 @@ alias dn_update_benri='bash -c "bash <( curl --raw https://raw.githubusercontent
 # Docker 関係
 alias dn_docker_show_containers_and_volumes='docker system df -v | tee /dev/tty | xargs -n 1 -P 1 -IXXX bash --noprofile --norc -c '"'"'id=$(echo -n "XXX" | awk "{printf \"%s\", \$1;}"); if [ $(echo -n $id | wc -m) -eq 64 ]; then echo ; echo "### Volume Container List for:"; echo "Volume: XXX"; docker ps -a --filter volume="$id"; fi'"'"'; echo'
 
+alias dn_docker_show_containers='docker ps -a -s'
+
 EOF
 
 chmod 755 /etc/profile.d/dn_benri_aliases.sh
