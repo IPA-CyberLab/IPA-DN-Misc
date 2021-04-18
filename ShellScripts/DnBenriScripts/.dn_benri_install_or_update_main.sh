@@ -13,6 +13,17 @@ alias dn_test1='echo Test1 OK!'
 # 便利関数の更新
 alias dn_update_benri='bash -c "bash <( curl --raw https://raw.githubusercontent.com/IPA-CyberLab/IPA-DN-Misc/main/ShellScripts/DnBenriScripts/install.sh )" ; source /etc/profile.d/dn_benri_aliases.sh'
 
+# プロセス関係
+function dn_process_getexe() {
+    command readlink -f /proc/$1/exe
+}
+
+function dn_process_findexe() {
+    ps ww -H -eo pid | awk '{print $1;}' | sort -n | uniq | xargs -n 1 -P 1 -IXXX readlink -f /proc/XXX/exe | grep -F -i $1 | sort | uniq
+}
+
+
+
 # Docker 関係
 alias dn_docker_show_containers='docker ps -a'
 alias dn_docker_show_containers_size='docker ps -a -s'
@@ -71,6 +82,11 @@ EOF
 #    と書く。
 # 
 # 糸冬了！！
+
+
+# メモ
+# awk 活用
+# cat a.txt | tee /dev/tty | xargs -n 1 -P 1 -IXXX bash -c 'id=$(echo -n "XXX" | awk "{printf \"%s\", \$1;}"); if [ $(echo -n $id | wc -m) -eq 64 ]; then echo a; echo "### Volume Container List for:"; echo "Volume: XXX"; docker ps -a --filter volume="$id"; fi'
 
 chmod 755 /etc/profile.d/dn_benri_aliases.sh
 
