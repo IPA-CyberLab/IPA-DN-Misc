@@ -2,7 +2,7 @@
 
 # How to run this script:
 # 
-# sudo bash -c "bash -x <( curl --raw https://raw.githubusercontent.com/IPA-CyberLab/IPA-DN-Misc/main/ShellScripts/DnBenriScripts/dn_benri_install_or_update.sh )"
+# sudo bash -c "bash <( curl --raw https://raw.githubusercontent.com/IPA-CyberLab/IPA-DN-Misc/main/ShellScripts/DnBenriScripts/dn_benri_install_or_update.sh )"
 
 set -eu
 
@@ -19,5 +19,12 @@ EOF
 chmod 755 /etc/profile.d/dn_benri_aliases.sh
 
 source /etc/profile.d/dn_benri_aliases.sh
+
+echo 
+
+echo Install OK !!
+
+echo
+
 
 
