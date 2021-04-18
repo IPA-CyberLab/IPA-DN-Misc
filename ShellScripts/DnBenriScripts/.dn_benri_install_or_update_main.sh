@@ -54,6 +54,11 @@ for storage in storages:
     num += 1
 "'
 
+
+
+
+EOF
+
 # メモ: インチキ・エイリアスの作成方法
 # 
 # 1. 先頭の cat <<\EOF | python3 と末尾の EOF を消す。
