@@ -1,9 +1,5 @@
 #!/bin/bash
 
-# How to run this script:
-# 
-# sudo bash -c "bash <( curl --raw https://raw.githubusercontent.com/IPA-CyberLab/IPA-DN-Misc/main/ShellScripts/DnBenriScripts/dn_benri_install_or_update.sh )"
-
 set -eu
 
 export DEBIAN_FRONTEND=noninteractive
@@ -23,9 +19,5 @@ source /etc/profile.d/dn_benri_aliases.sh
 echo 
 
 echo Install OK !!
-
-echo
-## 24
-
 
 
