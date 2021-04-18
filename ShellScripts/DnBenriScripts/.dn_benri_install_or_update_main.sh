@@ -22,7 +22,7 @@ alias dn_docker_show_containers_fast='docker ps -a'
 
 alias dn_docker_show_containers_running='docker ps -s'
 
-alias dn_docker_show_containers_running_fast='docker ps -a -s'
+alias dn_docker_show_containers_running_fast='docker ps'
 
 EOF
 
