@@ -54,6 +54,8 @@ for storage in storages:
     num += 1
 "'
 
+alias dn_docker_show_disk='dn_docker_show_volumes_size; dn_docker_show_volumes_used_by'
+
 
 EOF
 
