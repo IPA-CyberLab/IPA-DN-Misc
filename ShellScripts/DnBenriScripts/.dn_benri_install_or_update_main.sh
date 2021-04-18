@@ -43,20 +43,15 @@ if True:
                 flag=False
             else:
                 if flag:
-                    storage={\"name\":tokens[0],\"links\":tokens[1],\"size\":tokens[2]}
+                    storage={\"name\":tokens[0],\"links\":int(tokens[1]),\"size\":tokens[2]}
                     storages.append(storage)
-storages.sort(key=lambda x:x[\"name\"])
+storages.sort(key=lambda x:format((100000000 - x[\"links\"]), \"09\") + \"_\" + x[\"name\"])
 num = 0
 for storage in storages:
     print(f\"## Storage {num}: {storage['"'"'name'"'"']} (links: {storage['"'"'links'"'"']}) [size: {storage['"'"'size'"'"']}]\")
     os.system(f\"docker ps -a --filter volume={storage['"'"'name'"'"']}\")
     print(\"\")
     num += 1
-"'
-
-alias dn_docker_show_disk='dn_docker_show_volumes_size; dn_docker_show_volumes_used_by'
-
-
 EOF
 
 # メモ: インチキ・エイリアスの作成方法
