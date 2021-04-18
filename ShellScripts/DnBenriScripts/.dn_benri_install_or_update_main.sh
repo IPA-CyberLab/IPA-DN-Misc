@@ -52,7 +52,7 @@ for storage in storages:
     os.system(f\"docker ps -a --filter volume={storage['"'"'name'"'"']}\")
     print(\"\")
     num += 1
-EOF
+"'
 
 # メモ: インチキ・エイリアスの作成方法
 # 
