@@ -25,6 +25,8 @@ function dn_process_findexe() {
 
 
 # Docker 関係
+alias dn_tcpdump_vlan='tcpdump -e -n -nn -v -i'
+
 alias dn_docker_show_containers='docker ps -a'
 alias dn_docker_show_containers_size='docker ps -a -s'
 alias dn_docker_show_containers_running='docker ps'
