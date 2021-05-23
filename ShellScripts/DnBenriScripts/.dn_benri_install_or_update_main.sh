@@ -111,15 +111,15 @@ EOF
 
 chmod 755 /etc/profile.d/dn_benri_aliases.sh
 
-if [ -e ~/.bashrc_addtional ]; then
-  if [ $(cat ~/.bashrc_addtional | grep -F /etc/profile.d/dn_benri_aliases.sh | wc -l) -eq 0 ]; then
+touch ~/.bashrc_addtional
+
+if [ $(cat ~/.bashrc_addtional | grep -F /etc/profile.d/dn_benri_aliases.sh | wc -l) -eq 0 ]; then
 cat <<\EOF_BASHRC_ADDITIONAL >> ~/.bashrc_addtional
 
 # Added by .dn_benri_install_or_update_main.sh
 . /etc/profile.d/dn_benri_aliases.sh
 
 EOF_BASHRC_ADDITIONAL
-  fi
 fi
 
 echo 
