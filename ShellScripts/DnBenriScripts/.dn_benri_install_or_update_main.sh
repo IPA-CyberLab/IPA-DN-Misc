@@ -24,9 +24,28 @@ function dn_process_findexe() {
 
 
 
-# Docker 関係
+
+# ネットワーク関係
 alias dn_tcpdump_vlan='tcpdump -e -n -nn -v -i'
 
+# LXD 関係
+alias dn_lxc_vmlist='lxc list -c nsN46lc,boot.autostart:boot,volatile.last_state.power:last'
+function dn_lxc_autoboot_enable()
+{
+  command lxc config set $1 boot.autostart true
+}
+function dn_lxc_autoboot_disable()
+{
+  command lxc config set $1 boot.autostart false
+}
+function dn_lxc_autoboot_unset()
+{
+  command lxc config unset $1 boot.autostart
+}
+
+
+
+# Docker 関係
 alias dn_docker_show_containers='docker ps -a'
 alias dn_docker_show_containers_size='docker ps -a -s'
 alias dn_docker_show_containers_running='docker ps'
