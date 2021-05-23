@@ -4,6 +4,8 @@ set -eu
 
 export DEBIAN_FRONTEND=noninteractive
 
+### ============= bash スクリプト =============
+
 cat <<\EOF > /etc/profile.d/dn_benri_aliases.sh
 # by dnobori
 
@@ -42,6 +44,9 @@ function dn_lxc_autoboot_unset()
 {
   command lxc config unset $1 boot.autostart
 }
+
+alias dn_ping='ping -O -i 0.3'
+alias pingg='ping -O -i 0.3'
 
 
 
@@ -122,6 +127,32 @@ cat <<\EOF_BASHRC_ADDITIONAL >> ~/.bashrc_addtional
 EOF_BASHRC_ADDITIONAL
 fi
 
+
+### ============= 便利ユーティリティ (root 用) ここから =============
+if [[ $EUID -eq 0 ]]; then
+
+if [ $(dpkg -l | grep -F tcptraceroute | wc -l) -eq 0 ]; then
+  apt-get -y update && apt-get -y install tcptraceroute
+fi
+
+if [ $(dpkg -l | grep -F iputils-arping | wc -l) -eq 0 ]; then
+  apt-get -y update && apt-get -y install iputils-arping
+fi
+
+if [ ! -e /usr/bin/tcping ]; then
+  curl --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/tcping https://lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/tcpping/tcpping
+  chmod 755 /usr/bin/tcping
+fi
+
+if [ ! -e /usr/bin/tcpping ]; then
+  curl --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/tcpping https://lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/tcpping/tcpping
+  chmod 755 /usr/bin/tcpping
+fi
+
+fi
+### ============= 便利ユーティリティ (root 用) ここまで =============
+
+
 echo 
 
 echo Install or Update Benri Scripts OK !!
@@ -129,3 +160,4 @@ echo Install or Update Benri Scripts OK !!
 echo 
 
 
+# ping -O -i 0.3 192.168.3.2
