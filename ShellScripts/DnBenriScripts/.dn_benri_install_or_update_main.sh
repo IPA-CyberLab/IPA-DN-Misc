@@ -47,6 +47,7 @@ function dn_lxc_autoboot_unset()
 
 alias dn_ping='ping -O -i 0.3'
 alias pingg='ping -O -i 0.3'
+alias pin='ping -O -i 0.3'
 
 
 
