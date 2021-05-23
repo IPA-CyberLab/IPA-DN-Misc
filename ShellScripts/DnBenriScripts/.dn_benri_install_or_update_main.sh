@@ -29,7 +29,7 @@ function dn_process_findexe() {
 alias dn_tcpdump_vlan='tcpdump -e -n -nn -v -i'
 
 # LXD 関係
-alias dn_lxc_vmlist='lxc list -c nsN46lc,boot.autostart:boot,volatile.last_state.power:last'
+alias dn_lxc_show_vm='lxc list -c nsN46lc,boot.autostart:boot,volatile.last_state.power:last'
 function dn_lxc_autoboot_enable()
 {
   command lxc config set $1 boot.autostart true
