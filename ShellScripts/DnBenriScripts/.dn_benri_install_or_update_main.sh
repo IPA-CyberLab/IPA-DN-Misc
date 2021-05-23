@@ -91,7 +91,7 @@ for storage in storages:
 
 EOF
 
-# メモ: インチキ・エイリアスの作成方法
+# メモ: python プログラムのインチキ・エイリアスの作成方法
 # 
 # 1. 先頭の cat <<\EOF | python3 と末尾の EOF を消す。
 # 2. "   を   \"        に置換する。
@@ -110,6 +110,17 @@ EOF
 # cat a.txt | tee /dev/tty | xargs -n 1 -P 1 -IXXX bash -c 'id=$(echo -n "XXX" | awk "{printf \"%s\", \$1;}"); if [ $(echo -n $id | wc -m) -eq 64 ]; then echo a; echo "### Volume Container List for:"; echo "Volume: XXX"; docker ps -a --filter volume="$id"; fi'
 
 chmod 755 /etc/profile.d/dn_benri_aliases.sh
+
+if [ -e ~/.bashrc_addtional ]; then
+  if [ $(cat ~/.bashrc_addtional | grep -F /etc/profile.d/dn_benri_aliases.sh | wc -l) -eq 0 ]; then
+cat <<\EOF_BASHRC_ADDITIONAL >> ~/.bashrc_addtional
+
+# Added by .dn_benri_install_or_update_main.sh
+. /etc/profile.d/dn_benri_aliases.sh
+
+EOF_BASHRC_ADDITIONAL
+  fi
+fi
 
 echo 
 
