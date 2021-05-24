@@ -25,6 +25,14 @@ function dn_process_findexe() {
 }
 
 
+# システム関係
+alias dn_danger_reboot='echo Rebooting forcefully. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting... ; sleep 0.5 ; /sbin/reboot --force'
+alias dn_danger_rebootbios='echo Rebooting forcefully 2. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting with BIOS... ; sleep 0.5 ; echo 1 > /proc/sys/kernel/sysrq ; echo b > /proc/sysrq-trigger ; echo Perhaps triggered'
+
+function dn_dir_sort_size() {
+  command du -x -h -d 1 $@ | sort -h
+}
+
 
 
 # ネットワーク関係
