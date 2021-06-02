@@ -67,6 +67,9 @@ alias dn_docker_show_containers_running_size='docker ps -s'
 alias dn_docker_show_containers_size_running='docker ps -s'
 alias dn_docker_show_running_containers='docker ps'
 alias dn_docker_show_running_containers_size='docker ps -s'
+alias dn_docker_show_images='docker image ls'
+
+
 
 alias dn_docker_show_volumes='docker volume ls'
 
@@ -99,6 +102,14 @@ for storage in storages:
     print(\"\")
     num += 1
 "'
+
+alias dn_docker_run='docker run -it --rm'
+alias dn_docker_exec='docker exec -it'
+function dn_docker_exec_bash()
+{
+  command docker exec -it $1 /bin/bash
+}
+
 
 
 
