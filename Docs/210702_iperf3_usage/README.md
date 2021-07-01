@@ -19,7 +19,9 @@
 # 準備
 ## Linux (例: Ubuntu)
 ```
+
 apt-get -y update && apt-get -y install iperf3
+
 ```
 
 ## Windows
