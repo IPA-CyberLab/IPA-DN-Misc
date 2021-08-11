@@ -58,6 +58,9 @@ alias pingg='ping -O -i 0.3'
 alias pin='ping -O -i 0.3'
 
 
+# git 関係
+alias dn_git_update='(cd $(git rev-parse --show-toplevel) && git pull && git submodule update --init --recursive)'
+
 
 # Docker 関係
 alias dn_docker_show_containers='docker ps -a'
