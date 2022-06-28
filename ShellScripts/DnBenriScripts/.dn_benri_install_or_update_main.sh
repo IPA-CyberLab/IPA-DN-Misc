@@ -119,7 +119,7 @@ function dn_docker_exec_bash()
 
 
 
-alias command_name='python3 -c "
+alias dn_replace_str='python3 -c "
 import os
 import json
 import subprocess
