@@ -402,6 +402,11 @@ if [ ! -e /usr/bin/tcpping ]; then
   chmod 755 /usr/bin/tcpping
 fi
 
+if [ ! -e /usr/bin/pps2 ]; then
+  curl --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/pps2 https://static.lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/pps2/pps2
+  chmod 755 /usr/bin/pps2
+fi
+
 fi
 ### ============= 便利ユーティリティ (root 用) ここまで =============
 
