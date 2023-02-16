@@ -432,6 +432,15 @@ cat <<\EOF_BASHRC_ADDITIONAL >> ~/.bashrc_addtional
 EOF_BASHRC_ADDITIONAL
 fi
 
+### ブラケットペーストモードの無効化
+touch ~/.inputrc
+c1=$(cat ~/.inputrc | grep -F enable-bracketed-paste | wc -l)
+if [ $c1 -eq 0 ]; then
+cat <<\EOF_INPUTRC
+set enable-bracketed-paste off
+EOF_INPUTRC
+fi
+
 
 ### ============= 便利ユーティリティ (root 用) ここから =============
 if [[ $EUID -eq 0 ]]; then
