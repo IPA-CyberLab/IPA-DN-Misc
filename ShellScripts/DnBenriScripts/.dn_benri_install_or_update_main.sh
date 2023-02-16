@@ -436,7 +436,7 @@ fi
 touch ~/.inputrc
 c1=$(cat ~/.inputrc | grep -F enable-bracketed-paste | wc -l)
 if [ $c1 -eq 0 ]; then
-cat <<\EOF_INPUTRC
+cat <<\EOF_INPUTRC >> ~/.inputrc
 set enable-bracketed-paste off
 EOF_INPUTRC
 fi
