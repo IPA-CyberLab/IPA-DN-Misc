@@ -453,6 +453,10 @@ if [ $(dpkg -l | grep -F iputils-arping | wc -l) -eq 0 ]; then
   apt-get -y update && apt-get -y install iputils-arping
 fi
 
+if [ $(dpkg -l | grep -F " pv " | wc -l) -eq 0 ]; then
+  apt-get -y update && apt-get -y install pv
+fi
+
 if [ ! -e /usr/bin/tcping ]; then
   curl --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/tcping https://static.lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/tcpping/tcpping
   chmod 755 /usr/bin/tcping
