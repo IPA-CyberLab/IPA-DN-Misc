@@ -31,9 +31,9 @@ alias dn_danger_rebootbios='echo Rebooting forcefully 2. Syncing... ; sync ; syn
 alias reboot='echo Rebooting forcefully. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting... ; sleep 0.5 ; /sbin/reboot --force'
 alias rebootbios='echo Rebooting forcefully 2. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting with BIOS... ; sleep 0.5 ; echo 1 > /proc/sys/kernel/sysrq ; echo b > /proc/sysrq-trigger ; echo Perhaps triggered'
 
-alias dn_danger_rebootkernel='echo Rebooting with kexec-reboot forcefully. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting with kexec-reboot... ; sleep 0.5 /usr/sbin/kexec-reboot -l -r'
+alias dn_danger_rebootkernel='echo Rebooting with kexec-reboot forcefully. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting with kexec-reboot... ; sleep 0.5 ; /usr/sbin/kexec-reboot -l -r'
 
-alias rebootkernel='echo Rebooting with kexec-reboot forcefully. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting with kexec-reboot... ; sleep 0.5 /usr/sbin/kexec-reboot -l -r'
+alias rebootkernel='echo Rebooting with kexec-reboot forcefully. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting with kexec-reboot... ; sleep 0.5 ; /usr/sbin/kexec-reboot -l -r'
 
 function dn_dir_sort_size() {
   command du -x -h -d 1 $@ | sort -h
