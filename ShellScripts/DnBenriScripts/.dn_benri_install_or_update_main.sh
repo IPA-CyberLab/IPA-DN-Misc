@@ -473,19 +473,23 @@ if [ $(dpkg -l | grep -F " pv " | wc -l) -eq 0 ]; then
 fi
 
 if [ ! -e /usr/bin/tcping ]; then
-  curl --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/tcping https://static.lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/tcpping/tcpping
+  curl --fail --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/tcping https://static2.lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/tcpping/tcpping
   chmod 755 /usr/bin/tcping
 fi
 
 if [ ! -e /usr/bin/tcpping ]; then
-  curl --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/tcpping https://static.lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/tcpping/tcpping
+  curl --fail --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/tcpping https://static2.lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/tcpping/tcpping
   chmod 755 /usr/bin/tcpping
 fi
 
 if [ ! -e /usr/bin/pps2 ]; then
-  curl --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/pps2 https://static.lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/pps2/pps2
+  curl --fail --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/pps2 https://static2.lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/pps2/pps2
   chmod 755 /usr/bin/pps2
 fi
+
+curl --fail --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw https://static2.lts.dn.ipantt.net/d/210111_003_ubuntu_setup_scripts_59867/files/se_generate_login_banner.sh > /bin/se_generate_login_banner
+chmod 755 /bin/se_generate_login_banner
+
 
 fi
 ### ============= 便利ユーティリティ (root 用) ここまで =============
