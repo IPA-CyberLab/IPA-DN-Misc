@@ -63,6 +63,12 @@ alias dff='df --human-readable --print-type --exclude-type=tmpfs --exclude-type=
 
 alias getip='(echo -n "Hostname: " ; (hostname | sed -z "s/[\n\r]//g" ; echo " "; hostname --all-fqdns) | xargs) ; echo; ip -br link show ; echo ; ip -br address show | grep --color=never -E "^[0-9a-zA-Z\~\!\#\&\*\(\)\+\=\;\<\>\,\-\_\@\/\.\:\%]+ +[0-9a-zA-Z\~\!\#\&\*\(\)\+\=\;\<\>\,\-\_\@\/\.\:\%]+ +[0-9a-zA-Z\~\!\#\&\*\(\)\+\=\;\<\>\,\-\_\@\/\.\:\%]+.*$" ; echo ; (curl --silent --fail --connect-timeout 1.0 --noproxy "*" "http://getmyip-v4.arpanet.jp/?fqdn=1&port=1&all=1" | xargs) ; (curl --silent --fail --connect-timeout 1.0 --noproxy "*" "http://getmyip-v6.arpanet.jp/?fqdn=1&port=1&all=1" | xargs)'
 
+alias sysinfo='/bin/se_generate_login_banner'
+alias getinfo='/bin/se_generate_login_banner'
+alias state='/bin/se_generate_login_banner'
+alias status='/bin/se_generate_login_banner'
+alias ver='/bin/se_generate_login_banner'
+alias version='/bin/se_generate_login_banner'
 
 
 
