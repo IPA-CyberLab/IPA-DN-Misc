@@ -28,6 +28,12 @@ function dn_process_findexe() {
 # システム関係
 alias dn_danger_reboot='echo Rebooting forcefully. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting... ; sleep 0.5 ; /sbin/reboot --force'
 alias dn_danger_rebootbios='echo Rebooting forcefully 2. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting with BIOS... ; sleep 0.5 ; echo 1 > /proc/sys/kernel/sysrq ; echo b > /proc/sysrq-trigger ; echo Perhaps triggered'
+alias reboot='echo Rebooting forcefully. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting... ; sleep 0.5 ; /sbin/reboot --force'
+alias rebootbios='echo Rebooting forcefully 2. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting with BIOS... ; sleep 0.5 ; echo 1 > /proc/sys/kernel/sysrq ; echo b > /proc/sysrq-trigger ; echo Perhaps triggered'
+
+alias dn_danger_rebootkernel='echo Rebooting with kexec-reboot forcefully. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting with kexec-reboot... ; sleep 0.5 /usr/sbin/kexec-reboot -l -r'
+
+alias rebootkernel='echo Rebooting with kexec-reboot forcefully. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting with kexec-reboot... ; sleep 0.5 /usr/sbin/kexec-reboot -l -r'
 
 function dn_dir_sort_size() {
   command du -x -h -d 1 $@ | sort -h
@@ -472,6 +478,10 @@ if [ $(dpkg -l | grep -F " pv " | wc -l) -eq 0 ]; then
   apt-get -y update && apt-get -y install pv
 fi
 
+if [ $(dpkg -l | grep -F kexec-tools | wc -l) -eq 0 ]; then
+  apt-get -y update && apt-get -y install kexec-tools
+fi
+
 if [ ! -e /usr/bin/tcping ]; then
   curl --fail --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/tcping https://static2.lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/tcpping/tcpping
   chmod 755 /usr/bin/tcping
@@ -489,6 +499,9 @@ fi
 
 curl --fail --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw https://static2.lts.dn.ipantt.net/d/210111_003_ubuntu_setup_scripts_59867/files/se_generate_login_banner.sh > /bin/se_generate_login_banner
 chmod 755 /bin/se_generate_login_banner
+
+curl --fail --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw https://static2.lts.dn.ipantt.net/d/240301_001_85842/kexec-reboot_force.sh > /usr/sbin/kexec-reboot
+chmod 755 /usr/sbin/kexec-reboot
 
 
 fi
