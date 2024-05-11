@@ -28,6 +28,12 @@ function dn_process_findexe() {
 # システム関係
 alias dn_danger_reboot='echo Rebooting forcefully. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting... ; sleep 0.5 ; /sbin/reboot --force'
 alias dn_danger_rebootbios='echo Rebooting forcefully 2. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting with BIOS... ; sleep 0.5 ; echo 1 > /proc/sys/kernel/sysrq ; echo b > /proc/sysrq-trigger ; echo Perhaps triggered'
+alias reboot='echo Rebooting forcefully. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting... ; sleep 0.5 ; /sbin/reboot --force'
+alias rebootbios='echo Rebooting forcefully 2. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting with BIOS... ; sleep 0.5 ; echo 1 > /proc/sys/kernel/sysrq ; echo b > /proc/sysrq-trigger ; echo Perhaps triggered'
+
+alias dn_danger_rebootkernel='echo Rebooting with kexec-reboot forcefully. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting with kexec-reboot... ; sleep 0.5 ; /usr/sbin/kexec-reboot -l -r'
+
+alias rebootkernel='echo Rebooting with kexec-reboot forcefully. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting with kexec-reboot... ; sleep 0.5 ; /usr/sbin/kexec-reboot -l -r'
 
 function dn_dir_sort_size() {
   command du -x -h -d 1 $@ | sort -h
@@ -56,6 +62,21 @@ function dn_lxc_autoboot_unset()
 alias dn_ping='ping -O -i 0.3'
 alias pingg='ping -O -i 0.3'
 alias pin='ping -O -i 0.3'
+
+
+# システムユーティリティ関係
+alias dff='df --human-readable --print-type --exclude-type=tmpfs --exclude-type=efivarfs --exclude-type=squashfs --exclude-type=devtmpfs'
+
+alias getip='(echo -n "Hostname: " ; (hostname | sed -z "s/[\n\r]//g" ; echo " "; hostname --all-fqdns) | xargs) ; echo; ip -br link show ; echo ; ip -br address show | grep --color=never -E "^[0-9a-zA-Z\~\!\#\&\*\(\)\+\=\;\<\>\,\-\_\@\/\.\:\%]+ +[0-9a-zA-Z\~\!\#\&\*\(\)\+\=\;\<\>\,\-\_\@\/\.\:\%]+ +[0-9a-zA-Z\~\!\#\&\*\(\)\+\=\;\<\>\,\-\_\@\/\.\:\%]+.*$" ; echo ; (curl --silent --fail --connect-timeout 1.0 --noproxy "*" "http://getmyip-v4.arpanet.jp/?fqdn=1&port=1&all=1" | xargs) ; (curl --silent --fail --connect-timeout 1.0 --noproxy "*" "http://getmyip-v6.arpanet.jp/?fqdn=1&port=1&all=1" | xargs)'
+
+alias sysinfo='/bin/se_generate_login_banner'
+alias getinfo='/bin/se_generate_login_banner'
+alias state='/bin/se_generate_login_banner'
+alias status='/bin/se_generate_login_banner'
+alias ver='/bin/se_generate_login_banner'
+alias version='/bin/se_generate_login_banner'
+
+
 
 
 # git 関係
@@ -1035,20 +1056,31 @@ if [ $(dpkg -l | grep -F " pv " | wc -l) -eq 0 ]; then
   apt-get -y update && apt-get -y install pv
 fi
 
+if [ $(dpkg -l | grep -F kexec-tools | wc -l) -eq 0 ]; then
+  apt-get -y update && apt-get -y install kexec-tools
+fi
+
 if [ ! -e /usr/bin/tcping ]; then
-  curl --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/tcping https://static.lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/tcpping/tcpping
+  curl --fail --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/tcping https://static2.lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/tcpping/tcpping
   chmod 755 /usr/bin/tcping
 fi
 
 if [ ! -e /usr/bin/tcpping ]; then
-  curl --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/tcpping https://static.lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/tcpping/tcpping
+  curl --fail --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/tcpping https://static2.lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/tcpping/tcpping
   chmod 755 /usr/bin/tcpping
 fi
 
 if [ ! -e /usr/bin/pps2 ]; then
-  curl --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/pps2 https://static.lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/pps2/pps2
+  curl --fail --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw -o /usr/bin/pps2 https://static2.lts.dn.ipantt.net/d/210114_001_misc_images_and_files_14723/Scripts/pps2/pps2
   chmod 755 /usr/bin/pps2
 fi
+
+curl --fail --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw https://static2.lts.dn.ipantt.net/d/210111_003_ubuntu_setup_scripts_59867/files/se_generate_login_banner.sh > /bin/se_generate_login_banner
+chmod 755 /bin/se_generate_login_banner
+
+curl --fail --insecure --pinnedpubkey "sha256//lvnOVgA0u06WySztudkn+urQda/zFBRd65A5wCmcBpQ=" --raw https://static2.lts.dn.ipantt.net/d/240301_001_85842/kexec-reboot_force.sh > /usr/sbin/kexec-reboot
+chmod 755 /usr/sbin/kexec-reboot
+
 
 fi
 ### ============= 便利ユーティリティ (root 用) ここまで =============
