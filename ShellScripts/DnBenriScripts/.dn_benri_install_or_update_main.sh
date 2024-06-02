@@ -35,6 +35,13 @@ alias dn_danger_rebootkernel='echo Rebooting with kexec-reboot forcefully. Synci
 
 alias rebootkernel='echo Rebooting with kexec-reboot forcefully. Syncing... ; sync ; sync ; sync ; echo Sync OK. Rebooting with kexec-reboot... ; sleep 0.5 ; /usr/sbin/kexec-reboot -l -r'
 
+alias listen_public='netst -n | grep -F -i -e LISTEN -e "0.0.0.0" -e ":::" | grep -F -i -e tcp -e ud | grep -F -i -v "127.0.0.1:" | grep -F -i -v "::1:"'
+
+alias listen2='netst -n | grep -F -i -e LISTEN -e "0.0.0.0" -e ":::" | grep -F -i -e tcp -e ud | grep -F -i -v "127.0.0.1:" | grep -F -i -v "::1:"'
+
+alias public='netst -n | grep -F -i -e LISTEN -e "0.0.0.0" -e ":::" | grep -F -i -e tcp -e ud | grep -F -i -v "127.0.0.1:" | grep -F -i -v "::1:"'
+
+
 function dn_dir_sort_size() {
   command du -x -h -d 1 $@ | sort -h
 }
