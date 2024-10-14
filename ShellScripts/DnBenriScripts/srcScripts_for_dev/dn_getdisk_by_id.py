@@ -517,8 +517,6 @@ if __name__ == '__main__':
 
     dev_and_id_list = []
 
-    dev_and_id_list.append(("/dev/sdc", "123"))
-
     for line in lines:
         line = Str.Trim(line)
         if Str.IsFilled(line):
@@ -542,8 +540,6 @@ if __name__ == '__main__':
             mode = 0
             current_disk_name = ""
 
-    dev_and_id_list.append(("/dev/sdb", "123"))
-
     dev_and_id_list.sort(key=lambda x:x[0])
 
     ret = ""
@@ -557,10 +553,10 @@ if __name__ == '__main__':
             num += 1
 
     if Str.IsEmpty(ret):
-        raise Err(F"Disk id '{id}' not found.")
+        ret = "ERROR_NOT_FOUND_DISK_ID"
     
     if num >= 2:
-        raise Err(F"Disk id '{id}' found on more two disks.")
+        ret = "ERROR_DUPLICATED_DISK_ID"
 
     print(ret)
 

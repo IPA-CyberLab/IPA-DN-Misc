@@ -534,10 +534,10 @@ if __name__ == '__main__':
             num += 1
 
     if Str.IsEmpty(ret):
-        raise Err(F"Partition where size == '{id}' not found.")
+        ret = "ERROR_NOT_FOUND_PART_SIZE"
     
     if num >= 2:
-        raise Err(F"Partition where size == '{id}' found on more two partitions.")
+        ret = "ERROR_DUPLICATED_PART_SIZE"
 
     print(ret)
 
