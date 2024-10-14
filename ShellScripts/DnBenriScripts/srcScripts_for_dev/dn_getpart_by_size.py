@@ -539,7 +539,7 @@ if __name__ == '__main__':
     if num >= 2:
         ret = "ERROR_DUPLICATED_PART_SIZE"
 
-    print(ret)
+    print("/dev/" + ret)
 
 
     
