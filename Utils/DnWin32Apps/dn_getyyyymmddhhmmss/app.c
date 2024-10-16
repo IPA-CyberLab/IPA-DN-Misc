@@ -11,12 +11,13 @@ int main(int argc, char *argv[])
 	int printMode = 0;
 	int delimiter = 0;
 	int millisecs = 0;
+	int yymode = 0;
 
 	if (argc >= 2)
 	{
 		if (strcmpi(argv[1], "/?") == 0 || strcmpi(argv[1], "/help") == 0 || strcmpi(argv[1], "-?") == 0 || strcmpi(argv[1], "--help") == 0 || strcmpi(argv[1], "-h") == 0)
 		{
-			printf("Usage:\n [systemTimeMode=0|1] [printMode=0|1|2] [delimiter=0|1|2|3] [millisecs=0|1] \n");
+			printf("Usage:\n [systemTimeMode=0|1] [printMode=0|1|2] [delimiter=0|1|2|3] [millisecs=0|1] [yymode=0|1]\n");
 			return -1;
 		}
 
@@ -36,6 +37,11 @@ int main(int argc, char *argv[])
 	if (argc >= 5)
 	{
 		millisecs = (int)strtol(argv[4], NULL, 0);
+	}
+
+	if (argc >= 6)
+	{
+		yymode = (int)strtol(argv[5], NULL, 0);
 	}
 
 	if (systemTimeMode)
@@ -70,6 +76,14 @@ int main(int argc, char *argv[])
 	sprintf(yyyymmdd, "%04d%02d%02d", tm.wYear, tm.wMonth, tm.wDay);
 	sprintf(hhmmss, "%02d%02d%02d", tm.wHour, tm.wMinute, tm.wSecond);
 	sprintf(msecs, ".%03d", tm.wMilliseconds);
+
+	if (yymode)
+	{
+		char tmp[128] = { 0 };
+
+		strcpy(tmp, yyyymmdd + 2);
+		strcpy(yyyymmdd, tmp);
+	}
 
 	if (printMode == 1)
 	{
