@@ -17,6 +17,11 @@ int main(int argc, char *argv[])
 	{
 		if (strcmpi(argv[1], "/?") == 0 || strcmpi(argv[1], "/help") == 0 || strcmpi(argv[1], "-?") == 0 || strcmpi(argv[1], "--help") == 0 || strcmpi(argv[1], "-h") == 0)
 		{
+			printf("Welcome to\n");
+			printf(" Daiyuu Nobori's Super getyyyymmddhhmmss Utility !\n\n");
+			printf("Copyright (c) 2024 Daiyuu Nobori. All rights reserved.\n\n");
+			printf("Source code:\nhttps://github.com/IPA-CyberLab/IPA-DN-Misc/tree/main/Utils/DnWin32Apps/dn_getyyyymmddhhmmss/\n\n");
+			printf("License: Apache License 2.0\n\n");
 			printf("Usage:\n [systemTimeMode=0|1] [printMode=0|1|2] [delimiter=0|1|2|3] [millisecs=0|1] [yymode=0|1]\n");
 			return -1;
 		}
