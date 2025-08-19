@@ -1,0 +1,20 @@
+﻿# EtherIP 仮想デバイスドライバ設定
+
+config ETHERIP
+	tristate "EtherIP (RFC 3378) tunneling driver"
+	depends on INET
+	help
+	  EtherIP (RFC 3378) は、Ethernet フレームを IP パケット内に
+	  カプセル化するためのプロトコルです。このドライバは、EtherIP
+	  トンネリングをサポートする仮想ネットワークデバイスを提供します。
+
+	  このドライバは、"eip0", "eip1" などの名前の仮想ネットワーク
+	  インターフェースを作成し、設定された宛先 IP アドレスとの間で
+	  Ethernet フレームをトンネリングします。
+
+	  設定は /proc/sys/net/etherip/ 以下のファイルを通じて行います。
+
+	  このドライバをモジュールとしてコンパイルする場合、モジュール名は
+	  etherip になります。
+
+	  不明な場合は N を選択してください。
