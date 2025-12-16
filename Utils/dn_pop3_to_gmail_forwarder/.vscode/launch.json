@@ -10,8 +10,9 @@
             "args": [],
             "cwd": "${workspaceFolder}",
             "stopAtEntry": false,
-            // ★ここがポイント
-            "console": "externalTerminal"
+            //"console": "externalTerminal",
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen",
         }
     ]
 }
