@@ -154,26 +154,27 @@ public static class FeatureForward
                 return;
             }
 
-            int processedThisLogin = 0;
-            int totalThisLogin = messageCount;
+            // [WZZM4P46] STAT の次に LIST を取得し、RETR/DELE は LIST の MessageNo を用いる
+            List<Pop3Client.Pop3MessageListItem> mailList = await pop3.ListAsync(cancel).ConfigureAwait(false);
 
-            while (processedThisLogin < config.Pop3.MaxBatchMailsPerLogin)
+            if (mailList.Count <= 0)
+            {
+                logger.Info("No messages on POP3 server.");
+                return;
+            }
+
+            int totalThisLogin = mailList.Count;
+            int batchCount = Math.Min(totalThisLogin, config.Pop3.MaxBatchMailsPerLogin);
+
+            for (int i = 0; i < batchCount; i++)
             {
                 cancel.ThrowIfCancellationRequested();
 
-                (int currentCount, _) = await pop3.StatAsync(cancel).ConfigureAwait(false);
-                if (currentCount <= 0)
-                {
-                    logger.Info("No more messages on POP3 server in this session.");
-                    break;
-                }
+                int indexInThisLogin = i + 1;
+                int messageNo = mailList[i].MessageNo;
+                int listedSize = mailList[i].MailSize;
 
-                int indexInThisLogin = processedThisLogin + 1;
-
-                // ★ 1 セッション内では、常に 1 番目のメッセージを処理し続ける (削除したものは QUIT で反映され、再ログイン後も継続可能)
-                int messageNo = 1;
-
-                logger.Info($"POP3 RETR: index={indexInThisLogin}/{totalThisLogin}, msg_no={messageNo}, remaining={currentCount}");
+                logger.Info($"POP3 RETR: index={indexInThisLogin}/{totalThisLogin}, msg_no={messageNo}, size={listedSize}");
 
                 byte[] rawMail = await pop3.RetrieveMessageAsync(messageNo, cancel).ConfigureAwait(false);
 
@@ -203,12 +204,11 @@ public static class FeatureForward
                 await pop3.DeleteMessageAsync(messageNo, cancel).ConfigureAwait(false);
                 logger.Info(BuildMailMetaSummary("POP3 DELE completed", meta));
 
-                processedThisLogin++;
                 totalProcessed++;
             }
 
-            // max_batch_mails_per_login を超えた場合は、QUIT して再ログインする
-            if (processedThisLogin >= config.Pop3.MaxBatchMailsPerLogin)
+            // max_batch_mails_per_login を超えるメールがある場合は、QUIT して再ログインする
+            if (totalThisLogin > batchCount)
             {
                 logger.Info($"Reached max_batch_mails_per_login={config.Pop3.MaxBatchMailsPerLogin}. Re-login to POP3.");
             }
@@ -1941,6 +1941,68 @@ public static class FeatureForward
             }
 
             throw new Exception($"APPERROR: Invalid STAT response: {resp}");
+        }
+
+        /// <summary>
+        /// LIST を取得します。[WZZM4P46]
+        /// </summary>
+        /// <param name="cancel">キャンセル要求です。</param>
+        /// <returns>メール一覧です。(セッション内でユニークな MessageNo とサイズ)</returns>
+        public async Task<List<Pop3MessageListItem>> ListAsync(CancellationToken cancel)
+        {
+            await SendCommandAsync("LIST", cancel).ConfigureAwait(false);
+            string first = await ReadLineAsync(cancel).ConfigureAwait(false);
+            EnsureOk(first);
+
+            var list = new List<Pop3MessageListItem>();
+
+            while (true)
+            {
+                string line = await ReadLineAsync(cancel).ConfigureAwait(false);
+                if (line == ".")
+                {
+                    break;
+                }
+
+                if (line.StartsWith("..", StringComparison.Ordinal))
+                {
+                    line = line.Substring(1);
+                }
+
+                string[] parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2 &&
+                    int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int messageNo) &&
+                    int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int mailSize))
+                {
+                    list.Add(new Pop3MessageListItem
+                    {
+                        MessageNo = messageNo,
+                        MailSize = mailSize,
+                    });
+                }
+                else
+                {
+                    throw new Exception($"APPERROR: Invalid LIST response line: {line}");
+                }
+            }
+
+            return list;
+        }
+
+        /// <summary>
+        /// POP3 LIST の 1 行分データです。[WZZM4P46][KHQN6UTY]
+        /// </summary>
+        public sealed class Pop3MessageListItem
+        {
+            /// <summary>
+            /// メッセージ番号です。(セッション内でユニーク) [KHQN6UTY]
+            /// </summary>
+            public int MessageNo;
+
+            /// <summary>
+            /// メッセージサイズ (バイト) です。
+            /// </summary>
+            public int MailSize;
         }
 
         /// <summary>

@@ -133,6 +133,8 @@ gmail_max_mail_size = 40000000
   ただし、すでに現在ログインしているセッションにおいて取得したメール数が max_batch_mails_per_login 件を超える場合は、いったん POP3 のレイヤでログアウトする。その後、再度、(4) に戻り、再度新たに POP3 にログインする。以降、POP3 の残りメールが全部なくなるまで、これを繰り返す。
   
   メールを取得したら、何件中何件目であるかと、取得したメールサイズを、Info ログとして出力する。ログ内容メッセージは、英語とする。
+  
+  [WZZM4P46] メール取得上の注意。POP3 プロトコルにおいては、最初のログイン後、(a)「STAT」によりメールの件数を取得し、次に、(b) LIST によりメールの一覧を取得する。(b) では、メール ID (そのセッション内でユニークな番号 [KHQN6UTY]) とメールサイズが列挙される。それ以降、RETR や DELE コマンドでは、[KHQN6UTY] を用いてメールを識別し、取得および削除する。この POP3 の手順を遵守すること。AI が最初に作成した「RunForwardInternalAsync」関数は、手抜きであり、「// ★ 1 セッション内では、常に 1 番目のメッセージを処理し続ける (削除したものは QUIT で反映され、再ログイン後も継続可能)」とあるが、これは 2 通以上のメールがメールボックスに入っているとはにうまくいかない。「[Error] APPERROR: POP3 error response: -ERR Message is deleted.」というエラーを発生させてしまう。十分注意し、POP3 プロトコルのコンベンションに併せるようにせよ。
  
  (a-2) メールを取得したら、メモリ内において、そのメールの内容をパースして ([Q9MZU6D5] 参照)、MailMetaData にメモリ上で格納する。電子メールのパースにおいて、一部パース困難な部分があっても、致命的例外を発生させずに、その困難な部分以外のパースをすること。ただし、完全にパースに失敗した場合は (そうなることはほとんど考えられないが)、MailMetaData の MailSize は単にメールサイズをバイト単位で格納し、PlainTextBody にはメールの本文をそのまま UTF-8 形式で無理矢理デコードした形式を入れること。
 
@@ -220,9 +222,9 @@ public class MailMetaData
     public List<System.Net.Mail.MailAddress> AddressList_To; // To メールアドレス一覧。存在しない場合は空のリスト。
     public List<System.Net.Mail.MailAddress> AddressList_Cc; // Cc メールアドレス一覧。存在しない場合は空のリスト。
     public List<System.Net.Mail.MailAddress> AddressList_ReplyTo; // ReplyTo メールアドレス一覧。存在しない場合は空のリスト。
-    public List<string> AddressList_ReturnPath; // Return-Path アドレス一覧。存在しない場合は空のリスト。
-    public List<string> AddressList_OriginalTo; // X-Original-To アドレス一覧。存在しない場合は空のリスト。
-    public List<string> AddressList_DeliveredTo; // Delivered-To アドレス一覧。存在しない場合は空のリスト。
+    public List<string> AddressList_ReturnPath; // Return-Path アドレス一覧。存在しない場合は空のリスト。注意: "<username@example.org>" あるいは "aaa bbb <username@example.org>" の形式で元メールに入っている場合、メールアドレス部分、すなわち "<>" を除外した "username@example.org" の部分のみを格納せよ。なお、"<>" となっている場合は、その部分は、空文字 "" を格納せよ。なお、"username@example.org" の部分のみ元メールに入っている場合は、それをそのまま利用せよ。 [SS9R4XHX]
+    public List<string> AddressList_OriginalTo; // X-Original-To アドレス一覧。存在しない場合は空のリスト。[SS9R4XHX] の注意書きに同じ。
+    public List<string> AddressList_DeliveredTo; // Delivered-To アドレス一覧。存在しない場合は空のリスト。[SS9R4XHX] の注意書きに同じ。
     
     public string PlainTextBody; // 平文メールとして処理したときの平文メール本文全文 (デコード済み)。平文部分が存在しない場合は ""。
     public string HtmlBody; // HTML メールとして処理したときの HTML メール本文全文 (デコード済み)。HTML メールではない場合は ""。

@@ -316,3 +316,22 @@ AI 実行コンピュータ名: pc37
 
 
 
+===================================================================
+日時: 2025/12/18 22:31:50 (JST)
+開発者によって指示された指示の内容: POP3 取得手順の修正 (251218_YG7589 / WZZM4P46)
+作業内容の概要: STAT→LIST→RETR/DELE を MessageNo 基準で実装
+AI エンジン: GPT-5.2 (Codex CLI)
+AI 実行コンピュータ名: pc37
+関連タグ: 251218_YG7589, WZZM4P46, KHQN6UTY
+編集したファイルの一覧: feature_forward.cs
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): FeatureForward.RunForwardInternalAsync(), FeatureForward.Pop3Client.ListAsync(), FeatureForward.Pop3Client.Pop3MessageListItem
+実装において迷った点 (もしあれば): LIST の一覧順序を前提にせず、LIST 結果の MessageNo をそのまま利用する方針で統一
+参考文献 (複数あってよい): なし
+
+
+【詳細】
+- 仕様 [WZZM4P46] に従い、POP3 ログイン後に STAT→LIST を実施し、LIST の MessageNo ([KHQN6UTY]) を用いて RETR/DELE を行うように修正した。
+- RunForwardInternalAsync() で messageNo=1 を固定して処理し続ける実装を廃止し、LIST 結果の先頭から最大 max_batch_mails_per_login 件のみ処理して再ログインするようにした。
+- Pop3Client.ListAsync() を追加し、LIST の複数行レスポンスを '.' まで読み取り、(messageNo, size) を解析して返すようにした。
+- dotnet build を実施し、コンパイル成功を確認した。
+
