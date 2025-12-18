@@ -1,0 +1,175 @@
+﻿「251216_VP33AH CSharp .NET コーディング規約」
+
+このファイルの指示は、コーディングを行なうすべての場合に、適用される。
+
+以下の指示は、個別の指示によって上書きされる。指示がない場合には以下に従うこと。
+
+0. Windows および Linux (Ubuntu 24.04) 上における C# .net 6.0 で動作するコードとすること。
+
+1. スケルトンでなく、エラーない完全動作コードを生成。
+
+2. 重要点、難しい部分には、日本語コメント記載。
+
+3. 関数宣言・引数・戻値、データ構造にも、必ず日本語コメント記載。
+
+4. シンボル命名規則は、Microsoft 慣習・ハンガリアン表記禁止・予約語禁止。
+
+5. メモリリーク、リソースリークがないようにすること。[JE79ZKW7]
+(1) 自作クラス、ライブラリのクラスとも、IAsyncDisposable あるいは IDisposable がある場合は、不要な場合は必ず明示的廃棄を行なうこと。できる限り await using を用いること。不能な場合は using を用いること。
+(2) 自作クラスをライブラリとして実装し、呼出し元コードに利用させる場合は、可能な限りその自作ライブラリクラスは IAsyncDisposable と IDisposable の両方を実装すること。
+以下の方法により、そのクラスのインスタンスについて、呼出し元が IAsyncDisposable または IDisposable のいずれを呼んでも、同一のロジックにより、確実に dispose 処理がなされる。IAsyncDisposable が呼ばれることを期待して、できる限り Dispose 処理を非同期に行なう。だが、仮に、IDisposable が呼ばれても、Dispose 処理が同期的に実施されるようにする。
+(a) クラスは、IDisposable,IAsyncDisposable の両方を継承する。
+(b) public void Dispose() を実装し、{ this.Dispose(true); GC.SuppressFinalize(this); } を実装する。
+(c) protected virtual void Dispose(bool disposing) を実装し、disposing が false の場合、あるいは disposed フラグ (クラスの int 変数で、Interlocked.CompareExchange でアトミック的検査をしつつ値を設定する) が 0 でない場合は return する。それ以外の場合は、DisposeInternalAsync().GetAwaiter().GetResult(); を呼ぶ。
+(d) public virtual async ValueTask DisposeAsync() を実装し、disposed フラグ (クラスの int 変数で、Interlocked.CompareExchange でアトミック的検査をしつつ値を設定する) が 0 でない場合は return する。0 の場合は、await DisposeInternalAsync(); を呼び出す。
+(e) async Task DisposeInternalAsync() を実装し、ここで dispose のメイン処理を記述する。このクラスの機能として、バックグラウンドで動作しているタスクがあるなら、これを確実に停止試行し、停止するまで待機し、確保したすべてのリソースを解放したりする。使用リソースが IAsyncDisposable であればできるだけこれを await で呼ぶ。そうでない場合は IDisposable を同期的に呼ぶ。
+
+
+
+11. 同期・非同期
+(1) あるメソッドを実装する際、そのメソッド内またはその呼出し配下で、決して async / await 的な非同期メソッド (ファイルI/O、通信、スリープ系等) を呼ぶ可能性がないと判断される場合 (例: 文字列処理、メモリ内の処理等) は、その関数は、同期間数として実装する。
+(2) そうでない場合は、非同期関数 (Task または Task<T> を戻り値とする async 関数) とし、将来のマルチタスクスケーラビリティの実現に寄与する。非同期関数の名前は、そうできない何らかの理由がない限り 「○○Async」とすること。
+(2-2) (2) において、将来のために予備的に非同期関数を作ったが、その中で await を一度も呼んでいないとき、「warning CS1998」警告が出てしまう。これを避けるために、その関数の先頭に「await Task.CompletedTask; // await が 1 個もない警告を仮に非表示に」・・・ [A2AC88GT] を記載せよ。[A2AC88GT] は、あとで実際にその関数で await 処理が 1 つ以上入る時は不要になるので、削除せよ。
+(3) (2) において、真にパフォーマンスを重視する大量呼出し箇所では GC を避けるため ValueTask を利用することを許容するが、できるだけ Task を利用すること。
+(4) (a) 非同期関数では必ず、(b) 同期間数では時間がかかりアボート処理が必要な見込みがあるケースでは必ず、「CancellationToken cancel = default」を引数に付ける。
+なお、cancel は、関数を新設する時も、関数への引数追加時も、常に引数群の最後尾にすること。名前はできるだけ「cancel」にする。
+(5) (4) の cancel 引数を呼び出す側のコードは、cancel に対しては、CancellationToken を指定する場合は、「cancel: cancel」のように名前付きで引数を指定する。その理由は、後からその関数の cancel 以外の引数が増加しても呼出し元のコードの変更を不要とする点にある。呼出し元も CancellationToken の変数名はできるだけ cancel にすること。cancellationToken だと長くて目障りであるため。
+(6) (4)の (a), (b) のいずれの場合も、その関数内ループ処理では、CancellationToken に対して ThrowIfCancellationRequested(); あるいは IsCancellationRequested を適切にチェックし、また呼出し先の関数に CancellationToken を指定すべき場合は引き渡すことを忘れない。ただし、CPU処理を主に回すループ内で何度もキャンセルチェックを呼び出すと無駄に重くなるので、その場合は毎回ではなくある一定回数回すごとに1回チェックする等すること。
+(11) 非同期にコードを実行する場合で、これを await せず、Task に入れておいて、他の箇所で結果を参照するような場合は、その非同期実行コードの結果、意図しない例外が発生していないかどうかをチェックすること。そして、意図しない例外が発生している場合は、その例外の内容を、必ず、標準エラー出力に出力すること。そうしなければ、そこでバグや不具合が発生していても、ユーザーや開発者が気付くことができないためである。
+
+
+21. 日時
+(1) 日時データは可能な限り DateTimeOffset を用いる。
+(2) 日時データ画面表示は、指示なき限りローカル時刻を用い、「+09:00」 等のタイムゾーン文字列として表示。また、指示なき限り、現在のシステムロケールや文化によらず、「YYYY/MM/DD HH:MM:SS」形式で、年/月/日の順で表示。
+(3) プログラム内で経過時刻またはタイムアウト等を管理する場合は、逆戻りまたは飛躍する可能性がある DateTime.Now や DateTimeOffset.Now は利用せず、Environment.TickCount64 を利用する。
+(4) 関数等でタイムアウトを表現する際は、別途指示がない限り、ミリ秒単位とし、それを示す変数名や引数名には 「○○TimeoutMsecs」などの「Msecs」を付け、ミリ秒単位であることが明らかに分かるようにする。また、引数または設定ファイル等でタイムアウトが渡された場合は、「0」または「負の数」はタイムアウトなし (Infinite) を意味するものとして扱うこと。
+
+31. 保守性
+(1) 関数に、動作を制御するための色々なフラグを引数として付けようとするときで、そのフラグの数が多いか、あるいは将来も増えていきそうな場合は、引数の代わりに、「○○Options」という class (struct ではなく class にすること) を定義してそのインスタンスを渡すようにする。これにより、ある関数が別の子関数を次々に呼んでいく際にも、そのインスタンスをバケツリレーしていけばよいのでコードが読みやすくなる。
+(2) (1) の class は、コンストラクタを必須とせず、むしろ、利用プログラムが、
+--- ここから ---
+var aaaOptions = new AaaOptions
+{
+    オプション1 = 値1,
+    オプション2 = 値2,
+};
+--- ここまで ---
+のように値を初期設定できるようにすること。この場合、AaaOptions の定義例は、以下のとおり。
+--- ここから ---
+public class AaaOptions
+{
+    public string オプション1 = "デフォルトの文字列";
+    public int オプション2 = デフォルトの値;
+}
+--- ここまで ---
+ここで、string フィールドの場合、デフォルト値として "" を指定。(null 警告を消す)
+List 等のリスト型のフィールドの場合、デフォルトとして new List<T>(); のように空リスト等を代入。
+他の型についても、副作用がない限り最小の何らかのインスタンスを代入。それが難しい場合は、フィールド宣言は nullable ヒントを付ける。
+特段の必要性がない限り、プロパティではなく、単純な public フィールドでよい。
+
+
+41. 列挙体
+(1) 複数のビットを指定可能な列挙体は、以下のように、名前を「○○Flags」とし、必ず「None」を定義。フラグの組み合わせのデフォルト値を定義すべき場合は [251216_W9S4WQ] のように定義。この場合、フラグを受け取るデータ構造 (31 の (1) のクラスのフィールドの初期値や、関数の引数等のデフォルト値) には、Default を指定。将来の拡張の可能性を考慮し、型のサイズは「ulong」とする。
+--- ここから ---
+[Flags]
+public enum ○○Flags : ulong
+{
+    None = 0,
+    FlagA = 1,
+    FlagB = 2,
+    FlagC = 4,
+    FlagD = 8,
+    Default = FlagA | FlagD, // [251216_W9S4WQ]
+}
+--- ここまで ---
+
+(2) (1) 以外の列挙体の場合、以下のように、できるだけデフォルト値は常に 0 になるようにかつ先頭に記述する。以下の例では Apple がデフォルト値である。先頭のデフォルト値となる項目は「= 0」と明示的にゼロに設定し、2 個目以降は値を指定しない。
+--- ここから ---
+[Flags]
+public enum ○○Mode
+{
+    Apple = 0,
+    Banana,
+    Default = Apple,
+}
+--- ここまで ---
+
+61. 並列実行
+(1) 並列処理は、できるだけ Task を使用する。Task 間の同期は、
+(2) やむを得ない場合は、マルチスレッドを利用する。この際、コメントで、なぜマルチスレッドを用いる必要があるのか、Task が利用できない理由を詳述すること。
+
+
+71. クラス内クラス
+(1) クラス内クラスは、「クラス1.クラス2」というような長い名前となり、煩雑であるので、原則として使用しない。
+たとえば、Abc というクラスに関する、Xyz というデータ構造の場合、クラス内クラスを用いるのではなく、「Abc」をプレフィックスにして、「AbcXyz」という名前のクラスを、Abc と同列に並べること。
+(2) ただし、あるクラス内でプライベートに利用するデータ構造または機能クラスがある場合は、それをクラス外に露出しないことを条件に、クラス内クラスとして定義してもよい。
+
+
+101. 新たな .cs ファイルを作るときは、 [251216_VQNVG2] をテンプレートにする。
+[D2E4VZNX] には、日付を YYYY-MM-DD (タイムゾーンは JST) で記載。
+[K36GHRPP] には、AI エンジンのバージョン名、モデル名を記載。
+[CC8X8CXS] には、ルート名前空間を記載。ルート名前空間は、.sln ファイルの拡張子をのぞいたファイル名部分と同一。
+ただし、using の部分は、[251216_VQNVG2] に限らずに、必要に応じて追記していってよい。
+
+--- [251216_VQNVG2] ここから ---
+// Author: Daiyuu Nobori
+// Created: [D2E4VZNX]
+// Powered by AI: [K36GHRPP]
+
+#if true
+
+#pragma warning disable CA2235 // Mark all non-serializable fields
+
+using System;
+using System.Buffers;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Collections.Immutable;
+using System.Diagnostics;
+using System.IO;
+using System.Text;
+using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.Serialization;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+
+namespace [CC8X8CXS];
+
+// ★ ここにコード本体を書いていくこと。
+
+#endif
+--- ここまで ---
+
+
+81. 「アプリルート」ディレクトリ (あるいは「approot ディレクトリ」) について
+(1) 規約・仕様・指示で、「アプリルート」ディレクトリ (あるいは「approot ディレクトリ」。同一の意味) という概念が出てくることがある。「アプリルート」ディレクトリは、次の方法によって実行時に決定される。結果は static 変数などにキャッシュされ、最初の 1 回のみ探索が行なわれ、2 回目以降はキャッシュを用いること。「アプリルート」ディレクトリの情報が必要なのに、「approot」ファイルが発見されない場合は、その旨の例外を吐いて終了すること。
+  (a) まず、現在の .NET プログラム (このプログラム) のメインのアセンブリファイルが格納されているディレクトリを、「System.AppContext.BaseDirectory」を用いて取得する。
+  (b) (a) のディレクトリを始点とし、1 つずつ上位ディレクトリに遡っていき、「approot」というファイルが存在する (内容は何でもよく、読み出す必要もない。単に存在していればよい) ディレクトリを最初に発見したとき、その「approot」というファイルが存在するディレクトリが、「アプリルート」ディレクトリである。
+
+
+91. 例外メッセージ
+(1) 本アプリのロジック上で発生する例外メッセージのエラー文字列は、英語メッセージにすること。
+(2) (1) のエラー文字列は、「APPERROR: ○○」というように、最初に「APPERROR:」を付けること。ユーザーが一見してシステムエラーと区別できるようにするためである。
+
+
+101. JSON
+(1) JSON のシリアライズ / デシリアライズは、外部ライブラリの「Newtonsoft.Json」 をできるだけ使用すること。「System.Text.Json」は、特記されている場合をのぞき、できるだけ使用しないこと。
+(2) JSON のシリアライズは、できるだけ、改行・インデント入りのフル表記で実施すること。
+(3) JsonSerializerSettings は、特記または支障なき限り、次のようにすること。
+  - MaxDepth は 8
+  - NullValueHandling は NullValueHandling.Ignore
+  - ReferenceLoopHandling は ReferenceLoopHandling.Error
+  - PreserveReferencesHandling は PreserveReferencesHandling.None
+  - StringEscapeHandling は StringEscapeHandling.Default
+  - Formatting は Formatting.Indented
+
+
+
+9999. その他
+(1) 規約で記載されている方法でコーディングをすることが理論上できない場合や、何らかの問題を回避しなければならない場合は、回避して、規約に違反することも例外的に許容される。この場合、その部分のコードに、コメントとして「★☆★☆ 規約違反の例外: ○○○ やむを得ず違反する理由: ○○○ ★☆★☆」という書式で、その概要と理由を明記すること。
+
