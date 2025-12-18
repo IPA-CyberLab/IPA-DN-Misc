@@ -335,3 +335,24 @@ AI 実行コンピュータ名: pc37
 - Pop3Client.ListAsync() を追加し、LIST の複数行レスポンスを '.' まで読み取り、(messageNo, size) を解析して返すようにした。
 - dotnet build を実施し、コンパイル成功を確認した。
 
+
+
+===================================================================
+日時: 2025/12/18 22:36:26 (JST)
+開発者によって指示された指示の内容: メールアドレス文字列抽出の実装 (251218_YG5XK4 / SS9R4XHX)
+作業内容の概要: Return-Path 等から "<...>" を抽出
+AI エンジン: GPT-5.2 (Codex CLI)
+AI 実行コンピュータ名: pc37
+関連タグ: 251218_YG5XK4, SS9R4XHX
+編集したファイルの一覧: feature_forward.cs
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): FeatureForward.ParseMailMetaDataBestEffort(), FeatureForward.ExtractMailAddressStringsFromHeaderValue()
+実装において迷った点 (もしあれば): "<>" の場合は空文字を格納し、"<...>" が無い場合はヘッダ値全体を利用する方針
+参考文献 (複数あってよい): なし
+
+
+【詳細】
+- 仕様 [SS9R4XHX] に従い、Return-Path / X-Original-To / Delivered-To の各ヘッダ値について、"<user@example.org>" や "aaa bbb <user@example.org>" 形式の場合は "<>" を除去したアドレス部分のみを格納するようにした。
+- "<>" の場合は空文字 "" をリストに格納するようにし、"<...>" が 1 つも含まれない場合はヘッダ値全体 (trim 後) をそのまま格納するようにした。
+- 1 つのヘッダ値内に "<...>" が複数ある場合も、すべて抽出して格納するようにした。
+- dotnet build を実施し、コンパイル成功を確認した。
+

@@ -323,7 +323,10 @@ public static class FeatureForward
             {
                 foreach (string v in GetHeaderValues(message, "Return-Path"))
                 {
-                    if (string.IsNullOrWhiteSpace(v) == false) meta.AddressList_ReturnPath.Add(v.Trim());
+                    foreach (string addr in ExtractMailAddressStringsFromHeaderValue(v))
+                    {
+                        meta.AddressList_ReturnPath.Add(addr);
+                    }
                 }
             }
             catch { }
@@ -332,7 +335,10 @@ public static class FeatureForward
             {
                 foreach (string v in GetHeaderValues(message, "X-Original-To"))
                 {
-                    if (string.IsNullOrWhiteSpace(v) == false) meta.AddressList_OriginalTo.Add(v.Trim());
+                    foreach (string addr in ExtractMailAddressStringsFromHeaderValue(v))
+                    {
+                        meta.AddressList_OriginalTo.Add(addr);
+                    }
                 }
             }
             catch { }
@@ -341,7 +347,10 @@ public static class FeatureForward
             {
                 foreach (string v in GetHeaderValues(message, "Delivered-To"))
                 {
-                    if (string.IsNullOrWhiteSpace(v) == false) meta.AddressList_DeliveredTo.Add(v.Trim());
+                    foreach (string addr in ExtractMailAddressStringsFromHeaderValue(v))
+                    {
+                        meta.AddressList_DeliveredTo.Add(addr);
+                    }
                 }
             }
             catch { }
@@ -731,6 +740,49 @@ public static class FeatureForward
             {
                 yield return h.Value ?? "";
             }
+        }
+    }
+
+    /// <summary>
+    /// Return-Path / X-Original-To / Delivered-To のヘッダ値から、メールアドレス文字列を抽出します。[SS9R4XHX]
+    /// </summary>
+    /// <param name="headerValue">ヘッダ値です。</param>
+    /// <returns>抽出されたアドレス文字列一覧です。</returns>
+    private static IEnumerable<string> ExtractMailAddressStringsFromHeaderValue(string headerValue)
+    {
+        if (headerValue == null) throw new ArgumentNullException(nameof(headerValue));
+
+        string s = headerValue.Trim();
+        if (string.IsNullOrWhiteSpace(s))
+        {
+            yield break;
+        }
+
+        // [SS9R4XHX] "<...>" が含まれる場合は、その中身のみを抽出する。("<>" は空文字を格納)
+        bool foundAngleBracketPair = false;
+        int i = 0;
+
+        while (true)
+        {
+            int lt = s.IndexOf('<', i);
+            if (lt < 0) break;
+
+            int gt = s.IndexOf('>', lt + 1);
+            if (gt < 0) break;
+
+            foundAngleBracketPair = true;
+
+            string inner = s.Substring(lt + 1, gt - lt - 1).Trim();
+            yield return inner;
+
+            i = gt + 1;
+            if (i >= s.Length) break;
+        }
+
+        // "<...>" が 1 つも無い場合は、ヘッダ値全体をそのまま利用する
+        if (foundAngleBracketPair == false)
+        {
+            yield return s;
         }
     }
 
