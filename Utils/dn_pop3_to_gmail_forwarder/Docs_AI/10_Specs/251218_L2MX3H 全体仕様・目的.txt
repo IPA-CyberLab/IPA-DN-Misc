@@ -140,7 +140,7 @@ gmail_max_mail_size = 40000000
 
  
  (b) (a-2) で取得したメールを、アーカイブに保存する。アーカイブは、設定の「archive_dir」ディレクトリ内を作成し、さらに「YYMMDD」というサブディレクトリを作成し、その中に「YYMMDD_HHMMSS_SHA1_FROM64.txt」というファイル名で保存する (すでに txt が存在する場合は、上書きをする)。
-   - YYMMDD と HHMMSS は、MailMetaData の DateTime_Received を、プログラムを実行しているコンピュータのローカル時刻にした日時 (日付 6 桁、時刻 6 桁) である。DateTime_Received が不明の場合は、(a) で取得をした時点の時刻とすること。DateTime_Header は信頼できないので、参照しない。
+   - YYMMDD と HHMMSS は、MailMetaData の DateTime_Received を、プログラムを実行しているコンピュータのローカル時刻にした日時 (日付 6 桁、時刻 6 桁) である。DateTime_Received が不明の場合は、「(a) で取得をした時点の日付 + 午前 00:00:00 の時刻」とすること。DateTime_Header は信頼できないので、参照しない。[CQVFZY4W]
    - SHA1 の部分は、「MailMetaData」を変数として、JSON に変換した結果を UTF-8 エンコードし、これを SHA1 でハッシュ化したものを、小文字 16 進数表記した値とする。たとえば、「2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c」のような値である。メールによって異なるが、複数回同じメールを POP3 サーバーから取得しても、同じ値になるはずである。
    - FROM64 の部分は、MailMetaData の AddressList_From におけるメールアドレス部分 (aaa@example.org のような部分) をそのまま記載する。ただし、「a-z」「A-Z」「0-9」「@」「+」「-」「_」「.」以外の文字は、すべて、安全のため、「_」に置換すること。また、文字数が 64 文字を超える場合は、先頭 64 文字のみにすること。
    - txt ファイルの内容は、次のようなバイナリファイルとすること。

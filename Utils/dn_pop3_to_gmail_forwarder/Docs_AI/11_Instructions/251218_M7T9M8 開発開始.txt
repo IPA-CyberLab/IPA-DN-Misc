@@ -23,3 +23,8 @@ Main() で起動時に "Hello World" と表示するコードを先頭に追加�
 251218_XLVF4A:
 [YU4CRZ2B] と [KDXFFA9U] の点を改良せよ。
 
+251218_XTD4PS:
+[CQVFZY4W] の行の仕様を変更したので、適用せよ。
+
+
+

@@ -294,3 +294,25 @@ AI 実行コンピュータ名: pc37
 
 
 
+===================================================================
+日時: 2025/12/18 21:49:46 (JST)
+開発者によって指示された指示の内容: CQVFZY4W 仕様変更の適用 (251218_XTD4PS)
+作業内容の概要: DateTime_Received 不明時のアーカイブ命名日時を 00:00:00 に固定
+AI エンジン: GPT-5.2 (Codex CLI)
+AI 実行コンピュータ名: pc37
+関連タグ: 251218_XTD4PS, CQVFZY4W
+編集したファイルの一覧: feature_forward.cs
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): FeatureForward.ParseMailMetaDataBestEffort(), FeatureForward.SaveArchiveAsync()
+実装において迷った点 (もしあれば): DateTime_Received 不明の判定を保持するため、メタデータ内で null を維持するように変更
+参考文献 (複数あってよい): なし
+
+
+【詳細】
+- 仕様 [CQVFZY4W] に従い、アーカイブ保存時のファイル名 YYMMDD/HHMMSS の決定方法を変更した。
+- DateTime_Received が不明な場合は、(a) で取得した時点の『日付』 + 00:00:00 を用いて命名するようにし、時刻部分が取得時刻そのままにならないようにした。
+- DateTime_Received 不明を保持できるよう、メール解析側では DateTime_Received を安易に fetchedNow で埋めないように変更した。
+- dotnet build を実施し、コンパイル成功を確認した。
+
+
+
+

@@ -392,17 +392,13 @@ public static class FeatureForward
             }
             catch { }
 
-            // DateTime_Received が不明な場合のフォールバック
-            if (meta.DateTime_Received == null)
-            {
-                meta.DateTime_Received = fetchedNow;
-            }
+            // DateTime_Received が不明な場合は null のままにする (アーカイブ命名側で仕様 [CQVFZY4W] に従い扱う)
         }
         catch
         {
             // ★ 完全にパースに失敗した場合は、本文はメールバイナリを UTF-8 で無理矢理デコードしたものを入れる [AC579L84]
             meta.PlainTextBody = Encoding.UTF8.GetString(rawMail);
-            meta.DateTime_Received = fetchedNow;
+            // DateTime_Received は不明なので null のままにする (アーカイブ命名側で仕様 [CQVFZY4W] に従い扱う)
         }
 
         return meta;
@@ -978,8 +974,17 @@ public static class FeatureForward
         if (rawMail == null) throw new ArgumentNullException(nameof(rawMail));
         if (logger == null) throw new ArgumentNullException(nameof(logger));
 
-        DateTimeOffset dt = meta.DateTime_Received ?? fetchedNow;
-        DateTimeOffset local = dt.ToLocalTime();
+        // ★ [CQVFZY4W] DateTime_Received が不明の場合は、「(a) で取得をした時点の日付 + 午前 00:00:00 の時刻」とする
+        DateTimeOffset local;
+        if (meta.DateTime_Received != null)
+        {
+            local = meta.DateTime_Received.Value.ToLocalTime();
+        }
+        else
+        {
+            DateTimeOffset fetchedLocal = fetchedNow.ToLocalTime();
+            local = new DateTimeOffset(fetchedLocal.Year, fetchedLocal.Month, fetchedLocal.Day, 0, 0, 0, fetchedLocal.Offset);
+        }
 
         string yyMMdd = local.ToString("yyMMdd", CultureInfo.InvariantCulture);
         string hhmmss = local.ToString("HHmmss", CultureInfo.InvariantCulture);
