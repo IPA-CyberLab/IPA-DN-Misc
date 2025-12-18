@@ -162,6 +162,7 @@ gmail_max_mail_size = 40000000
    [B] Gmail API を呼び出すためのクレデンシャルは、[F3QBRBA9] で作成された、[A44FBNFX] 内の 「token_json」に指定されている JSON ファイルを使用すること。この JSON ファイルをまず読み取りで読む。LastRefreshDt よりも gmail_token_refresh_interval_secs 秒以上経過していたら、トークンの更新処理行なう。トークンの更新処理で新しいトークンが得られたら、「token_json」に指定されている JSON ファイルにそのトークンを書き込むこと。
    
    [C] Gmail API では、「users.messages.import」 API を用いて、この 1 件のメールのデータ ((a) で取得したものそのまま) を、「INBOX」「UNREAD」というラベルを確実に付けた上で、ユーザーの Gmail 受信トレイに書き込む。
+      - インポート時は、neverMarkSpam=True オプションを有効にすること。[N9YQARM8]
 
   Info ログとして、書き込み対象メールの MailSize、DateTime_Received、AddressList_From、AddressList_To、Subject、MessageId と、これが Gmail メールボックスに書き込み完了した旨を、わかりやすく、出力する。
    

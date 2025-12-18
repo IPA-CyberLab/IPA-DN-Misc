@@ -1239,7 +1239,8 @@ public static class FeatureForward
 
         using HttpClient httpClient = CreateHttpClientForGmail(config);
 
-        string url = "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/import?uploadType=multipart";
+        // ★ インポート時は neverMarkSpam=True を有効化する [N9YQARM8]
+        string url = "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/import?uploadType=multipart&neverMarkSpam=true";
 
         for (int attempt = 1; attempt <= config.Gmail.TcpRetryAttempts; attempt++)
         {

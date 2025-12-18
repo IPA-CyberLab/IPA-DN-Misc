@@ -356,3 +356,23 @@ AI 実行コンピュータ名: pc37
 - 1 つのヘッダ値内に "<...>" が複数ある場合も、すべて抽出して格納するようにした。
 - dotnet build を実施し、コンパイル成功を確認した。
 
+
+
+===================================================================
+日時: 2025/12/18 22:44:54 (JST)
+開発者によって指示された指示の内容: Gmail import 時に neverMarkSpam=True を有効化 (251218_YQ78RE)
+作業内容の概要: users.messages.import の URL にクエリを追加
+AI エンジン: GPT-5.2 (Codex CLI)
+AI 実行コンピュータ名: pc37
+関連タグ: 251218_YQ78RE, N9YQARM8
+編集したファイルの一覧: feature_forward.cs
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): FeatureForward.GmailApiImportAsync()
+実装において迷った点 (もしあれば): API の multipart upload URL に対してクエリで付与する方針
+参考文献 (複数あってよい): なし
+
+
+【詳細】
+- 仕様 [N9YQARM8] に従い、Gmail API の users.messages.import 呼び出しにおいて neverMarkSpam=True を有効にするため、リクエスト URL に `&neverMarkSpam=true` を追加した。
+- 既存のラベル付与 (INBOX/UNREAD) および multipart upload 方式は維持した。
+- dotnet build を実施し、コンパイル成功を確認した。
+
