@@ -377,7 +377,7 @@ public static class FeatureGetToken
         }
         catch (Exception ex)
         {
-            throw new Exception($"APPERROR: Failed to parse token endpoint JSON response. Body: {body}", ex);
+            throw new Exception(LibCommon.AppendExceptionDetail($"APPERROR: Failed to parse token endpoint JSON response. Body: {body}", ex), ex);
         }
 
         string? accessToken = json.Value<string>("access_token");

@@ -21,6 +21,27 @@ namespace dn_pop3_to_gmail_forwarder;
 public static class LibCommon
 {
     /// <summary>
+    /// innerException の詳細を、例外メッセージ末尾に文字列として付加します。 [CSK235RL]
+    /// </summary>
+    /// <param name="message">基本メッセージです。</param>
+    /// <param name="innerException">内側例外です。(null の場合は付加しません)</param>
+    /// <returns>Detail 付加後のメッセージです。</returns>
+    public static string AppendExceptionDetail(string message, Exception? innerException)
+    {
+        message ??= "";
+
+        if (innerException == null) return message;
+
+        string detail = innerException.ToString();
+        detail = NormalizeNewlinesToLf(detail);
+
+        if (string.IsNullOrEmpty(detail)) return message;
+
+        // ★ innerException は呼出し元で無視される可能性があるため、必ず message 末尾に Detail として付加する [CSK235RL]
+        return message.TrimEnd() + "\nDetail: " + detail;
+    }
+
+    /// <summary>
     /// Newtonsoft.Json 用の標準シリアライズ設定を作成します。 [PV4U3JTR]
     /// </summary>
     /// <returns>シリアライズ設定です。</returns>
@@ -129,4 +150,3 @@ public static class LibCommon
 }
 
 #endif
-

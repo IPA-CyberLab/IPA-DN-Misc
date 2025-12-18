@@ -877,7 +877,7 @@ public static class FeatureForward
         }
         catch (Exception ex)
         {
-            throw new Exception($"APPERROR: Failed to parse refresh token endpoint JSON response. Body: {body}", ex);
+            throw new Exception(LibCommon.AppendExceptionDetail($"APPERROR: Failed to parse refresh token endpoint JSON response. Body: {body}", ex), ex);
         }
     }
 
@@ -1007,7 +1007,7 @@ public static class FeatureForward
         }
         catch (Exception ex)
         {
-            throw new Exception("APPERROR: Failed to parse TOML config file.", ex);
+            throw new Exception(LibCommon.AppendExceptionDetail("APPERROR: Failed to parse TOML config file.", ex), ex);
         }
 
         var cfg = new ForwardConfig
@@ -1717,7 +1717,7 @@ public static class FeatureForward
                 }
             }
 
-            throw new Exception("APPERROR: Failed to connect POP3 server.", lastEx);
+            throw new Exception(LibCommon.AppendExceptionDetail("APPERROR: Failed to connect POP3 server.", lastEx), lastEx);
         }
 
         private void SetStream(Stream s)

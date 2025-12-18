@@ -229,3 +229,24 @@ AI 実行コンピュータ名: pc37
 
 
 
+===================================================================
+日時: 2025/12/18 20:59:24 (JST)
+開発者によって指示された指示の内容: コード全体で CSK235RL を確実化
+作業内容の概要: innerException 詳細を例外メッセージへ付加する共通化と適用
+AI エンジン: GPT-5.2 (Codex CLI)
+AI 実行コンピュータ名: pc37
+関連タグ: CSK235RL
+編集したファイルの一覧: lib_common.cs, feature_gettoken.cs, feature_forward.cs
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): LibCommon.AppendExceptionDetail(), FeatureGetToken.ExchangeCodeForTokenAsync(), FeatureForward.RefreshGmailAccessTokenAsync(), FeatureForward.LoadConfigAsync(), FeatureForward.Pop3Client.ConnectAsync()
+実装において迷った点 (もしあれば): なし
+参考文献 (複数あってよい): なし
+
+
+【詳細】
+- 規約 [CSK235RL] に従い、innerException を付けて新たな例外を throw する箇所では、innerException.ToString() を例外メッセージ末尾へ 'Detail:' として必ず付加するようにした。
+- 共通処理として lib_common.cs に LibCommon.AppendExceptionDetail() を追加し、該当する throw new Exception(..., ex) をすべてこの関数経由に置換した。
+- dotnet build を実施し、コンパイル成功を確認した。
+
+
+
+
