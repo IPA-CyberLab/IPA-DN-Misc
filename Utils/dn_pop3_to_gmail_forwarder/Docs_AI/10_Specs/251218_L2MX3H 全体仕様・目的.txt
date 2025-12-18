@@ -25,10 +25,166 @@
       (iv) 認証結果を、<結果初期トークンJSONファイル> として書き出す。JSON 書式は [EG8R7RTE] とする。そのファイルに書き出した旨の案内メッセージを HTTP サーバーでユーザーに丁寧で面白みのある暖かい HTML で表示し、Web ブラウザを閉じて良い旨の記載とともに、Web ブラウザを閉じるためのボタンも用意する。
       (v) ユーザーは、このプロセスを、Ctrl + C などの普通の手段で強制終了する。
 
-  (b) 「メール転送実施モード」 (forward モード)
-    - これについては、別途後述する。
+  (b) 「メール転送実施モード」 (forward モード) [AC579L84]
+    - これについては、「3.」で詳述する。
 
 
+3. メール転送実施モードの仕様 [AC579L84]
+
+(1) コマンドライン: 「forward --config <設定ファイル>」 とする。
+
+(2) 「設定ファイル」は、ユーザーがテキストエディタで記述した TOML ファイルであり、これを読み取り専用でロードする。設定ファイルは、[A44FBNFX] のような書式をしている。
+
+--- [A44FBNFX] ここから ---
+
+## 全体設定
+[generic]
+
+# [必須] アーカイブディリクトリ (相対パスを指定した場合は、この TOML 設定ファイルが存在するディレクトリからの相対パスとなる)
+archive_dir = "data/archive/"
+
+# [必須] ログディレクトリ (相対パスを指定した場合は、この TOML 設定ファイルが存在するディレクトリからの相対パスとなる)
+log_dir = "data/log/"
+
+
+## メールの転送元 (POP3 受信側メールボックス) の認証設定
+[pop3]
+
+# [必須] POP3 サーバーホスト名または IP アドレス
+hostname = "pop3.example.org"
+
+# [必須] POP3 サーバーの TCP ポート番号
+port = 993
+
+# [必須] SSL 使用モード (none = 未使用, starttls = 使用し、かつ START TLS モード, full = 使用し、かつ TCP 接続時から SSL でラップ)
+ssl_mode = "full"
+
+# [必須] SSL を使用する場合でかつサーバー側証明書を検証するか
+ssl_verify_server_cert = true
+
+# [必須] POP3 ユーザー認証のためのユーザー名
+username = "aaa"
+
+# [必須] POP3 ユーザー認証のためのパスワード
+password = "bbb"
+
+# [必須] TCP 接続リトライ回数
+tcp_retry_attempts = 3
+
+# [必須] TCP 接続タイムアウト秒数
+tcp_connect_timeout_secs = 6
+
+# [必須] TCP 通信の送信タイムアウト秒数
+tcp_send_timeout_secs = 60
+
+# [必須] TCP 通信の受信タイムアウト秒数
+tcp_recv_timeout_secs = 60
+
+# [必須] 1 回の POP3 ログインごとに回す最大メール数
+max_batch_mails_per_login = 10
+
+
+## メールの転送先 (Gmail API) の認証設定
+[gmail]
+
+# [必須] 「Gmail OAuth トークン取得モード」 (gettoken モード) [F3QBRBA9] で作成された Gmail 用トークンファイルを指定する。相対パスを指定した場合は、この TOML 設定ファイルが存在するディレクトリからの相対パスとなる。
+token_json = "secret_token.json"
+
+# [必須] Gmail API の HTTPS (SSL) においてサーバー側証明書を検証するか
+ssl_verify_server_cert = true
+
+# [必須] TCP 接続リトライ回数
+tcp_retry_attempts = 3
+
+# [必須] TCP 接続タイムアウト秒数
+tcp_connect_timeout_secs = 6
+
+# [必須] TCP 通信の送信タイムアウト秒数
+tcp_send_timeout_secs = 60
+
+# [必須] TCP 通信の受信タイムアウト秒数
+tcp_recv_timeout_secs = 60
+
+# [必須] トークンの更新間隔秒数
+gmail_token_refresh_interval_secs = 15
+
+# [必須] 最大メールバイト数
+gmail_max_mail_size = 40000000
+
+
+--- [A44FBNFX] ここまで ---
+
+(3) メール転送実施モードが起動すると、まず、指定された TOML 設定ファイル [A44FBNFX] を読み込みパースする。スキーマと意味は [A44FBNFX] のコメント欄を参照すること。[必須] と記載されたフィールドは必須であり、空白またはおかしな値が入っていれば、例外を発生させる。
+
+以下、致命的なエラーまたは警告的なエラーが発生したら、必ず、Error ログとして出力する。ログ内容メッセージは、英語とする。
+
+(4) 次に、POP3 サーバーに接続し、ログインをする。なお、POP3 プロトコルは、.NET の BCL の TCP ライブラリおよび SSL ライブラリを用いて対話すること。POP3 プロトコルについて、外部の NuGet ライブラリを利用してはならない。POP3 プロトコルに係る TCP, SSL, タイムアウト等の制御パラメータは、[A44FBNFX] の各値を用いること。意味は、コメント欄を参照すること。
+
+ログイン試行時およびログイン結果 (成功)、メールが何件あるか等の詳しい情報を、Info ログとして出力する。ログ内容メッセージは、英語とする。ただし、POP3 のユーザー名はログに記載するが、パスワードは、決して記載しない。
+
+(4-1) ログインしたら、POP3 プロトコルを用いて、メールボックスに届いているメールを、1 件ずつ取得する。「(a) 1 件取得 → (b) アーカイブへの保存 → (c) Gmail への転送 → (d) その 1 件を削除」の順で繰り返す。ある (a) を開始したとき、(b) 、(c) を実施完了しない限り、絶対に、(d) は実施しないこと。これにより、仮に (b) または (c) への書き込みに失敗した場合にメールが失われるリスクを避けることができる。
+ より詳細な手順は、次のとおりである。
+ 
+ (a) 1 件取得
+  POP3 プロトコルを用いて、メールを、1 件取得する。この時点では、メールはメールボックスから削除しない。
+  ただし、すでに現在ログインしているセッションにおいて取得したメール数が max_batch_mails_per_login 件を超える場合は、いったん POP3 のレイヤでログアウトする。その後、再度、(4) に戻り、再度新たに POP3 にログインする。以降、POP3 の残りメールが全部なくなるまで、これを繰り返す。
+  
+  メールを取得したら、何件中何件目であるかと、取得したメールサイズを、Info ログとして出力する。ログ内容メッセージは、英語とする。
+ 
+ (a-2) メールを取得したら、メモリ内において、そのメールの内容をパースして ([Q9MZU6D5] 参照)、MailMetaData にメモリ上で格納する。電子メールのパースにおいて、一部パース困難な部分があっても、致命的例外を発生させずに、その困難な部分以外のパースをすること。ただし、完全にパースに失敗した場合は (そうなることはほとんど考えられないが)、MailMetaData の MailSize は単にメールサイズをバイト単位で格納し、PlainTextBody にはメールの本文をそのまま UTF-8 形式で無理矢理デコードした形式を入れること。
+
+  パース結果の MailMetaData のうち、MailSize、DateTime_Received、AddressList_From、AddressList_To、Subject、MessageId の項目を、人間にわかりやすく、「POP3 サーバーから取得したメールの内容」として、Info ログとして出力する。
+
+ 
+ (b) (a-2) で取得したメールを、アーカイブに保存する。アーカイブは、設定の「archive_dir」ディレクトリ内を作成し、さらに「YYMMDD」というサブディレクトリを作成し、その中に「YYMMDD_HHMMSS_SHA1_FROM64.txt」というファイル名で保存する (すでに txt が存在する場合は、上書きをする)。
+   - YYMMDD と HHMMSS は、MailMetaData の DateTime_Received を、プログラムを実行しているコンピュータのローカル時刻にした日時 (日付 6 桁、時刻 6 桁) である。DateTime_Received が不明の場合は、(a) で取得をした時点の時刻とすること。DateTime_Header は信頼できないので、参照しない。
+   - SHA1 の部分は、「MailMetaData」を変数として、JSON に変換した結果を UTF-8 エンコードし、これを SHA1 でハッシュ化したものを、小文字 16 進数表記した値とする。たとえば、「2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c」のような値である。メールによって異なるが、複数回同じメールを POP3 サーバーから取得しても、同じ値になるはずである。
+   - FROM64 の部分は、MailMetaData の AddressList_From におけるメールアドレス部分 (aaa@example.org のような部分) をそのまま記載する。ただし、「a-z」「A-Z」「0-9」「@」「+」「-」「_」「.」以外の文字は、すべて、安全のため、「_」に置換すること。また、文字数が 64 文字を超える場合は、先頭 64 文字のみにすること。
+   - txt ファイルの内容は、次のようなバイナリファイルとすること。
+     -- 先頭に、UTF-8 の BOM を付ける。
+     -- ファイルの先頭部分には、まず、2 行改行を開けてから、MailMetaData をそのままシリアライズ化した結果の JSON データがバイナリとして貼り付けられる (その内部表現形式は JSON であるので UTF-8 である)。
+     -- 次に、JSON データの次に 2 行改行を開けて、「===================================================================」 [U2LFKTKR] という文字列を貼り付け、改行する。
+     -- 最後に、元の (a) で取得したこのメールの内容バイナリを、一切変更せず、そのまま書き出す。
+   - つまり、1 個の txt ファイルに、メールを MailMetaData にパースした結果 (メタデータ的なもの) と、メールのデコード前のデータ (生データ) とが、[U2LFKTKR] という区切り文字列を境界として、共存している状態の内容とする。
+   
+  Info ログとして、アーカイブ保存した txt ファイルの出力先ファイル名とファイルサイズをわかりやすく出力する。
+
+ (c) Gmail への転送処理は、次のように行なわれる。ただし、メールサイズが "gmail_max_mail_size" を超えている場合は、その旨を詳しく「標準エラー出力」(標準出力ではない) にメッセージとして記載して、Gmail への転送をスキップする。
+ 
+   [A] Gmail に HTTPS API で接続する際の、HTTPS プロトコルに係る TCP, SSL, タイムアウト等の制御パラメータは、[A44FBNFX] の各値を用いること。意味は、コメント欄を参照すること。
+    Gmail との通信は、.NET の BCL の TCP ライブラリおよび SSL ライブラリを用いて対話すること。Gmail API プロトコルについて、外部の NuGet ライブラリを利用してはならない。
+   
+   [B] Gmail API を呼び出すためのクレデンシャルは、[F3QBRBA9] で作成された、[A44FBNFX] 内の 「token_json」に指定されている JSON ファイルを使用すること。この JSON ファイルをまず読み取りで読む。LastRefreshDt よりも gmail_token_refresh_interval_secs 秒以上経過していたら、トークンの更新処理行なう。トークンの更新処理で新しいトークンが得られたら、「token_json」に指定されている JSON ファイルにそのトークンを書き込むこと。
+   
+   [C] Gmail API では、「users.messages.import」 API を用いて、この 1 件のメールのデータ ((a) で取得したものそのまま) を、「INBOX」「UNREAD」というラベルを確実に付けた上で、ユーザーの Gmail 受信トレイに書き込む。
+
+  Info ログとして、書き込み対象メールの MailSize、DateTime_Received、AddressList_From、AddressList_To、Subject、MessageId と、これが Gmail メールボックスに書き込み完了した旨を、わかりやすく、出力する。
+   
+   [D] [C] の書き込みがエラーなく完了したことをもって、(d) へ行く。なお、何らかのエラーが発生した場合は、例外を発生させ、この時点でプログラムを終了させる。
+
+ (d) 最後に、POP3 サーバーから、対象メールを削除する処理を行なう。
+  Info ログとして、書き込み対象メールの MailSize、DateTime_Received、AddressList_From、AddressList_To、Subject、MessageId と、これを POP3 サーバーから削除した旨を、わかりやすく、出力する。
+
+
+81. ログ記録機能
+(1) このプログラムの仕様で、「Error ログ」または「Info ログ」を出力するよう指示があった場合は、次のとおりログ出力をしなければならない。
+
+(2) ログは、1 ログ 1 行のデータであり、[Y5CRNZA3] の書式を有する。
+--- [Y5CRNZA3] ここから ---
+YYYY/MM/DD HH:MM:SS.SSS +XX:XX [Type] 本文
+--- [Y5CRNZA3] ここまで ---
+
+「YYYY/MM/DD HH:MM:SS.SSS +XX:XX」は、ログを出力しようとする瞬間の日時 (ミリ秒単位) である。タイムゾーンを併記し、タイムゾーンはシステムのローカル時計設定にあわせる。
+
+Type には、Error または Info のいずれかが入る。
+
+本文は、1 行の何らかの 0 文字以上の文字列である。ログ書き込みをしようとする側が、改行を含んでいた場合は、改行 ("\r\n" または "\n") は、" / " という文字に置換され、必ず 1 行となる。
+
+(3) ログは、設定ファイル [A44FBNFX] の「log_dir」ディレクトリ内に、「YYMMDD.log」というファイル名で保存 (追記型書き込み) される。
+
+(4) ログを保存しようとする際には、それと全く同一の行を、Error の場合は標準エラー出力、Info の場合は標準出力に文字列として出力する。
+
+(5) ログの保存またはディレクトリの作成に失敗した場合の例外は、その旨を標準エラー出力に出した上で、続行する (例外を無視する)。
 
 
 91. Gmail との OAuth トークン情報 JSON ファイルの書式 [EG8R7RTE]
@@ -41,6 +197,43 @@ public class GMailOAuthTokenJsonData
     public string UserAccessToken; // アクセストークン (必要に応じて更新される)
 }
 --- ここまで ---
+
+
+92. メール本文の内部データ [VZR2Y5BY]
+--- ここから ---
+public class MailMetaData
+{
+    public int MailSize;   // メールのサイズ (単位: バイト)
+    
+    public string Subject; // Subject の文字列。デコード済み。無い場合は ""。
+    
+    public DateTimeOffset? DateTime_Header; // Date ヘッダの日時。不明な場合は null。
+    
+    public DateTimeOffset? DateTime_Received; // Received ヘッダから推定されるメールの配信日時。不明な場合は null。
+    
+    public string MessageId; // メッセージ ID 文字列。無い場合は ""。
+    
+    public System.Net.Mail.MailAddress? AddressList_From; // From メールアドレス。不明な場合は null。
+    public List<System.Net.Mail.MailAddress> AddressList_To; // To メールアドレス一覧。存在しない場合は空のリスト。
+    public List<System.Net.Mail.MailAddress> AddressList_Cc; // Cc メールアドレス一覧。存在しない場合は空のリスト。
+    public List<System.Net.Mail.MailAddress> AddressList_ReplyTo; // ReplyTo メールアドレス一覧。存在しない場合は空のリスト。
+    public List<string> AddressList_ReturnPath; // Return-Path アドレス一覧。存在しない場合は空のリスト。
+    public List<string> AddressList_OriginalTo; // X-Original-To アドレス一覧。存在しない場合は空のリスト。
+    public List<string> AddressList_DeliveredTo; // Delivered-To アドレス一覧。存在しない場合は空のリスト。
+    
+    public string PlainTextBody; // 平文メールとして処理したときの平文メール本文全文 (デコード済み)。平文部分が存在しない場合は ""。
+    public string HtmlBody; // HTML メールとして処理したときの HTML メール本文全文 (デコード済み)。HTML メールではない場合は ""。
+    public string HtmlBodyToPlainText; // HtmlBody には、HTML タグが詰まっていて、「&nbsp;」や HTML のいろいろなエンコード方式でのエスケープがなされている可能性がある。これを、あとで全文検索エンジンに投入可能な程度に、普通の平文文字列に置換した状態 (つまり、ユーザーがテキストビューアでそのメールを表示しようとすると表示されるべき状態) の文字列を格納する。HTML メールではない場合は ""。
+    
+    public List<string> AttachmentFileNamesList; // 添付ファイル名のリスト。存在しない場合は空のリスト。なお、HTML メールの場合、HTML 本文や HTML 本文内の画像などが含まれている場合があるが、これらは添付ファイルとしてはここに入れないこと。普通のメーラにおいて、「添付ファイル」であるとみなされるものが、添付ファイルである。
+}
+--- ここまで ---
+
+
+
+99. 使用ライブラリ (Nuget) [Q9MZU6D5]
+- TOML 設定ファイルの読み書きが必要な場合には、「Tomlyn」ライブラリを使用すること。
+- POP3 等において、電子メールデータのパースには、「MimeKit」ライブラリを使用すること。
 
 
 
