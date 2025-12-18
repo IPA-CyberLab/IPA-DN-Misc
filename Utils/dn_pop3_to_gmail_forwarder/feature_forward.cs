@@ -13,6 +13,7 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -20,6 +21,7 @@ using System.Net.Http.Headers;
 using System.Net.Mail;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -196,8 +198,27 @@ public static class FeatureForward
                 else
                 {
                     string accessToken = await EnsureGmailAccessTokenAsync(config, logger, cancel).ConfigureAwait(false);
-                    await GmailApiImportAsync(config, accessToken, rawMail, cancel).ConfigureAwait(false);
-                    logger.Info(BuildMailMetaSummary("Gmail import completed", meta));
+                    GmailImportOutcome importOutcome = await GmailApiImportAsync(config, accessToken, rawMail, meta, cancel).ConfigureAwait(false);
+                    switch (importOutcome)
+                    {
+                        case GmailImportOutcome.ImportedOriginal:
+                            logger.Info(BuildMailMetaSummary("Gmail import completed", meta));
+                            break;
+                        case GmailImportOutcome.ImportedAfterAttachmentRemovalStepA:
+                            logger.Info(BuildMailMetaSummary("Gmail import completed after attachment removal step (a)", meta));
+                            break;
+                        case GmailImportOutcome.ImportedAfterAttachmentRemovalStepB:
+                            logger.Info(BuildMailMetaSummary("Gmail import completed after attachment removal step (b)", meta));
+                            break;
+                        case GmailImportOutcome.ImportedAfterAttachmentRemovalStepC:
+                            logger.Info(BuildMailMetaSummary("Gmail import completed after attachment removal step (c)", meta));
+                            break;
+                        case GmailImportOutcome.ImportedSystemMessageInstead:
+                            logger.Error(BuildMailMetaSummary("Failed to import mail to Gmail server. Imported a system message instead", meta));
+                            break;
+                        default:
+                            throw new Exception($"APPERROR: Unknown Gmail import outcome: {importOutcome}");
+                    }
                 }
 
                 // POP3 削除
@@ -1220,34 +1241,182 @@ public static class FeatureForward
     }
 
     /// <summary>
+    /// Gmail API import の結果種別です。[ULP8TK5N][GTFE562C]
+    /// </summary>
+    private enum GmailImportOutcome
+    {
+        /// <summary>
+        /// 元メールのインポートに成功しました。
+        /// </summary>
+        ImportedOriginal = 0,
+
+        /// <summary>
+        /// 添付ファイル削除 (a) 後のインポートに成功しました。[GTFE562C]
+        /// </summary>
+        ImportedAfterAttachmentRemovalStepA,
+
+        /// <summary>
+        /// 添付ファイル削除 (b) 後のインポートに成功しました。[GTFE562C]
+        /// </summary>
+        ImportedAfterAttachmentRemovalStepB,
+
+        /// <summary>
+        /// 添付ファイル削除 (c) 後のインポートに成功しました。[GTFE562C]
+        /// </summary>
+        ImportedAfterAttachmentRemovalStepC,
+
+        /// <summary>
+        /// 元メールのインポートには失敗しましたが、システムメッセージのインポートに成功しました。[GTFE562C][HA7DHHGE]
+        /// </summary>
+        ImportedSystemMessageInstead,
+    }
+
+    /// <summary>
     /// Gmail API の users.messages.import を呼び出します。
     /// </summary>
     /// <param name="config">設定です。</param>
     /// <param name="accessToken">アクセストークンです。</param>
     /// <param name="rawMail">メールの生データです。</param>
+    /// <param name="meta">メールメタデータです。</param>
     /// <param name="cancel">キャンセル要求です。</param>
-    private static async Task GmailApiImportAsync(ForwardConfig config, string accessToken, byte[] rawMail, CancellationToken cancel)
+    /// <returns>インポート結果種別です。</returns>
+    private static async Task<GmailImportOutcome> GmailApiImportAsync(ForwardConfig config, string accessToken, byte[] rawMail, MailMetaData meta, CancellationToken cancel)
     {
         if (config == null) throw new ArgumentNullException(nameof(config));
         if (accessToken == null) throw new ArgumentNullException(nameof(accessToken));
         if (rawMail == null) throw new ArgumentNullException(nameof(rawMail));
+        if (meta == null) throw new ArgumentNullException(nameof(meta));
+
+        using HttpClient httpClient = CreateHttpClientForGmail(config);
+
+        // まずは元メールのインポートを試みる
+        GmailApiImportCallResult first = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, rawMail, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);
+        if (first.IsSuccess)
+        {
+            return GmailImportOutcome.ImportedOriginal;
+        }
+
+        // [ULP8TK5N] 400 Bad Request の場合のみ、添付削除の再試行を行う [GTFE562C]
+        if (first.StatusCode != HttpStatusCode.BadRequest)
+        {
+            throw new Exception($"APPERROR: Gmail API users.messages.import returned {(int)first.StatusCode} {first.ReasonPhrase}. Body: {first.Body}");
+        }
+
+        // (a) 危険拡張子の添付ファイルを削除して再試行する [GTFE562C][LA5UBK7L]
+        byte[]? stepA = TryBuildMailBytesForBadRequestStepA(rawMail);
+        if (stepA != null)
+        {
+            GmailApiImportCallResult r = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, stepA, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);
+            if (r.IsSuccess) return GmailImportOutcome.ImportedAfterAttachmentRemovalStepA;
+            if (r.StatusCode != HttpStatusCode.BadRequest)
+            {
+                throw new Exception($"APPERROR: Gmail API users.messages.import returned {(int)r.StatusCode} {r.ReasonPhrase}. Body: {r.Body}");
+            }
+        }
+
+        // (b) 危険ファイルを含むアーカイブ添付を削除して再試行する [GTFE562C][LA5UBK7L]
+        byte[]? stepB = TryBuildMailBytesForBadRequestStepB(rawMail);
+        if (stepB != null)
+        {
+            GmailApiImportCallResult r = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, stepB, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);
+            if (r.IsSuccess) return GmailImportOutcome.ImportedAfterAttachmentRemovalStepB;
+            if (r.StatusCode != HttpStatusCode.BadRequest)
+            {
+                throw new Exception($"APPERROR: Gmail API users.messages.import returned {(int)r.StatusCode} {r.ReasonPhrase}. Body: {r.Body}");
+            }
+        }
+
+        // (c) すべての添付ファイルを削除して再試行する [GTFE562C]
+        byte[]? stepC = TryBuildMailBytesForBadRequestStepC(rawMail);
+        if (stepC != null)
+        {
+            GmailApiImportCallResult r = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, stepC, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);
+            if (r.IsSuccess) return GmailImportOutcome.ImportedAfterAttachmentRemovalStepC;
+            if (r.StatusCode != HttpStatusCode.BadRequest)
+            {
+                throw new Exception($"APPERROR: Gmail API users.messages.import returned {(int)r.StatusCode} {r.ReasonPhrase}. Body: {r.Body}");
+            }
+        }
+
+        // (a)(b)(c) いずれも 400 の場合は、代わりにシステムメッセージをインポートする [GTFE562C][HA7DHHGE]
+        byte[] sysMsg = BuildSystemMessageRawMailBytes(config, meta, first.Body);
+
+        try
+        {
+            GmailApiImportCallResult sysResp = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, sysMsg, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);
+            if (sysResp.IsSuccess)
+            {
+                return GmailImportOutcome.ImportedSystemMessageInstead;
+            }
+
+            throw new Exception($"APPERROR: Gmail API users.messages.import (system message) returned {(int)sysResp.StatusCode} {sysResp.ReasonPhrase}. Body: {sysResp.Body}");
+        }
+        catch (Exception ex)
+        {
+            // [HA7DHHGE] システムメッセージのインポート失敗はログ記録した上で元メールの失敗として扱う
+            throw new Exception(LibCommon.AppendExceptionDetail("APPERROR: Failed to import system message to Gmail.", ex), ex);
+        }
+    }
+
+    /// <summary>
+    /// Gmail API import 呼び出し結果です。
+    /// </summary>
+    private sealed class GmailApiImportCallResult
+    {
+        /// <summary>
+        /// 成功したかどうかです。
+        /// </summary>
+        public bool IsSuccess;
+
+        /// <summary>
+        /// HTTP ステータスコードです。(成功時は 200 系)
+        /// </summary>
+        public HttpStatusCode StatusCode;
+
+        /// <summary>
+        /// ReasonPhrase です。
+        /// </summary>
+        public string ReasonPhrase = "";
+
+        /// <summary>
+        /// レスポンスボディ文字列です。
+        /// </summary>
+        public string Body = "";
+    }
+
+    /// <summary>
+    /// Gmail API users.messages.import を、通信エラー/5xx のリトライ付きで 1 回実行します。
+    /// </summary>
+    /// <param name="httpClient">HTTP クライアントです。</param>
+    /// <param name="accessToken">アクセストークンです。</param>
+    /// <param name="rawMail">メール生データです。</param>
+    /// <param name="retryAttempts">最大リトライ回数です。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    /// <returns>呼び出し結果です。</returns>
+    private static async Task<GmailApiImportCallResult> GmailApiImportRawMessageWithRetriesAsync(HttpClient httpClient, string accessToken, byte[] rawMail, int retryAttempts, CancellationToken cancel)
+    {
+        if (httpClient == null) throw new ArgumentNullException(nameof(httpClient));
+        if (accessToken == null) throw new ArgumentNullException(nameof(accessToken));
+        if (rawMail == null) throw new ArgumentNullException(nameof(rawMail));
+        if (retryAttempts <= 0) throw new ArgumentOutOfRangeException(nameof(retryAttempts));
 
         // ★ Gmail API users.messages.import は multipart upload を用いて、生メールデータを base64 変換せずに送信する
         //    これにより、サイズ増大 (base64 の 4/3) を回避し、(a) の生データをそのまま送れる。
         string metaJson = JsonConvert.SerializeObject(new { labelIds = new[] { "INBOX", "UNREAD" } }, LibCommon.CreateStandardJsonSerializerSettings());
         metaJson = metaJson.Replace("\r\n", "\n").Replace("\r", "\n");
 
-        using HttpClient httpClient = CreateHttpClientForGmail(config);
-
         // ★ インポート時は neverMarkSpam=True を有効化する [N9YQARM8]
-        string url = "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/import?uploadType=multipart&neverMarkSpam=true";
+        const string Url = "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/import?uploadType=multipart&neverMarkSpam=true";
 
-        for (int attempt = 1; attempt <= config.Gmail.TcpRetryAttempts; attempt++)
+        HttpRequestException? lastHttpEx = null;
+
+        for (int attempt = 1; attempt <= retryAttempts; attempt++)
         {
             cancel.ThrowIfCancellationRequested();
+
             try
             {
-                using var req = new HttpRequestMessage(HttpMethod.Post, url);
+                using var req = new HttpRequestMessage(HttpMethod.Post, Url);
                 req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
                 using var multipart = new MultipartContent("related");
@@ -1268,24 +1437,681 @@ public static class FeatureForward
 
                 if (resp.IsSuccessStatusCode)
                 {
-                    return;
+                    return new GmailApiImportCallResult
+                    {
+                        IsSuccess = true,
+                        StatusCode = resp.StatusCode,
+                        ReasonPhrase = resp.ReasonPhrase ?? "",
+                        Body = body,
+                    };
                 }
 
                 // 4xx は即失敗 (リトライしても意味が薄い) / 5xx はリトライ
-                if ((int)resp.StatusCode >= 500 && attempt < config.Gmail.TcpRetryAttempts)
+                if ((int)resp.StatusCode >= 500 && attempt < retryAttempts)
                 {
                     await Task.Delay(500, cancel).ConfigureAwait(false);
                     continue;
                 }
 
-                throw new Exception($"APPERROR: Gmail API users.messages.import returned {(int)resp.StatusCode} {resp.ReasonPhrase}. Body: {body}");
+                return new GmailApiImportCallResult
+                {
+                    IsSuccess = false,
+                    StatusCode = resp.StatusCode,
+                    ReasonPhrase = resp.ReasonPhrase ?? "",
+                    Body = body,
+                };
             }
-            catch (HttpRequestException) when (attempt < config.Gmail.TcpRetryAttempts)
+            catch (HttpRequestException ex) when (attempt < retryAttempts)
             {
+                lastHttpEx = ex;
                 await Task.Delay(500, cancel).ConfigureAwait(false);
                 continue;
             }
+            catch (HttpRequestException ex)
+            {
+                throw new Exception(LibCommon.AppendExceptionDetail("APPERROR: Gmail API request failed.", ex), ex);
+            }
         }
+
+        throw new Exception(LibCommon.AppendExceptionDetail("APPERROR: Gmail API request failed after retries.", lastHttpEx), lastHttpEx);
+    }
+
+    /// <summary>
+    /// Gmail が 400 Bad Request を応答した場合の、添付ファイル削除 (a) のメールデータを作成します。[GTFE562C]
+    /// </summary>
+    /// <param name="rawMail">元メールの生データです。</param>
+    /// <returns>作成できた場合は新しいメール生データ、失敗した場合は null です。</returns>
+    private static byte[]? TryBuildMailBytesForBadRequestStepA(byte[] rawMail)
+    {
+        if (rawMail == null) throw new ArgumentNullException(nameof(rawMail));
+
+        MimeMessage message;
+        try
+        {
+            using var ms = new MemoryStream(rawMail, writable: false);
+            message = MimeMessage.Load(ms);
+        }
+        catch
+        {
+            return null;
+        }
+
+        try
+        {
+            var removeSet = new HashSet<MimeEntity>(ReferenceEqualityComparer<MimeEntity>.Instance);
+            foreach (MimeEntity att in message.Attachments)
+            {
+                string fileName = GetMimeEntityFileNameBestEffort(att);
+                if (HasDangerousFileExtension(fileName))
+                {
+                    removeSet.Add(att);
+                }
+            }
+
+            RemoveAttachmentsFromMessage(message, removeSet);
+            PrefixSubjectForAttachmentRemoval(message);
+
+            return SerializeMimeMessageToBytes(message);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gmail が 400 Bad Request を応答した場合の、添付ファイル削除 (b) のメールデータを作成します。[GTFE562C]
+    /// </summary>
+    /// <param name="rawMail">元メールの生データです。</param>
+    /// <returns>作成できた場合は新しいメール生データ、失敗した場合は null です。</returns>
+    private static byte[]? TryBuildMailBytesForBadRequestStepB(byte[] rawMail)
+    {
+        if (rawMail == null) throw new ArgumentNullException(nameof(rawMail));
+
+        MimeMessage message;
+        try
+        {
+            using var ms = new MemoryStream(rawMail, writable: false);
+            message = MimeMessage.Load(ms);
+        }
+        catch
+        {
+            return null;
+        }
+
+        try
+        {
+            var removeSet = new HashSet<MimeEntity>(ReferenceEqualityComparer<MimeEntity>.Instance);
+
+            foreach (MimeEntity att in message.Attachments)
+            {
+                string fileName = GetMimeEntityFileNameBestEffort(att);
+                if (IsArchiveFileName(fileName) == false)
+                {
+                    continue;
+                }
+
+                if (TryGetDecodedMimeEntityBytes(att, out byte[] attBytes) == false)
+                {
+                    // 解析できないアーカイブは疑わしいため削除対象とする (ベストエフォート) [GTFE562C]
+                    removeSet.Add(att);
+                    continue;
+                }
+
+                if (ArchiveContainsDangerousFileName(fileName, attBytes, out _))
+                {
+                    removeSet.Add(att);
+                }
+            }
+
+            RemoveAttachmentsFromMessage(message, removeSet);
+            PrefixSubjectForAttachmentRemoval(message);
+
+            return SerializeMimeMessageToBytes(message);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gmail が 400 Bad Request を応答した場合の、添付ファイル削除 (c) のメールデータを作成します。[GTFE562C]
+    /// </summary>
+    /// <param name="rawMail">元メールの生データです。</param>
+    /// <returns>作成できた場合は新しいメール生データ、失敗した場合は null です。</returns>
+    private static byte[]? TryBuildMailBytesForBadRequestStepC(byte[] rawMail)
+    {
+        if (rawMail == null) throw new ArgumentNullException(nameof(rawMail));
+
+        MimeMessage message;
+        try
+        {
+            using var ms = new MemoryStream(rawMail, writable: false);
+            message = MimeMessage.Load(ms);
+        }
+        catch
+        {
+            return null;
+        }
+
+        try
+        {
+            var removeSet = new HashSet<MimeEntity>(ReferenceEqualityComparer<MimeEntity>.Instance);
+            foreach (MimeEntity att in message.Attachments)
+            {
+                removeSet.Add(att);
+            }
+
+            RemoveAttachmentsFromMessage(message, removeSet);
+            PrefixSubjectForAttachmentRemoval(message);
+
+            return SerializeMimeMessageToBytes(message);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 添付ファイル削除時の Subject プレフィックスを付与します。[GTFE562C]
+    /// </summary>
+    /// <param name="message">MimeMessage です。</param>
+    private static void PrefixSubjectForAttachmentRemoval(MimeMessage message)
+    {
+        if (message == null) throw new ArgumentNullException(nameof(message));
+
+        string original = message.Subject ?? "";
+        message.Subject = $"【注: 転送時に添付ファイル削除】 {original}";
+    }
+
+    /// <summary>
+    /// MimeMessage から指定された添付ファイル群を削除します。
+    /// </summary>
+    /// <param name="message">MimeMessage です。</param>
+    /// <param name="removeSet">削除対象の MimeEntity セットです。</param>
+    private static void RemoveAttachmentsFromMessage(MimeMessage message, HashSet<MimeEntity> removeSet)
+    {
+        if (message == null) throw new ArgumentNullException(nameof(message));
+        if (removeSet == null) throw new ArgumentNullException(nameof(removeSet));
+
+        if (message.Body == null)
+        {
+            message.Body = new TextPart("plain") { Text = "" };
+            return;
+        }
+
+        // ルートが削除対象の場合はプレースホルダに置換する
+        if (removeSet.Contains(message.Body))
+        {
+            message.Body = new TextPart("plain") { Text = "" };
+            return;
+        }
+
+        RemoveMimeEntitiesInPlace(message.Body, removeSet);
+
+        if (message.Body is Multipart mp && mp.Count == 0)
+        {
+            mp.Add(new TextPart("plain") { Text = "" });
+        }
+    }
+
+    private static int RemoveMimeEntitiesInPlace(MimeEntity entity, HashSet<MimeEntity> removeSet)
+    {
+        if (entity == null) throw new ArgumentNullException(nameof(entity));
+        if (removeSet == null) throw new ArgumentNullException(nameof(removeSet));
+
+        int removed = 0;
+
+        if (entity is Multipart multipart)
+        {
+            for (int i = multipart.Count - 1; i >= 0; i--)
+            {
+                MimeEntity child = multipart[i];
+
+                if (removeSet.Contains(child))
+                {
+                    multipart.RemoveAt(i);
+                    removed++;
+                    continue;
+                }
+
+                removed += RemoveMimeEntitiesInPlace(child, removeSet);
+
+                if (child is Multipart childMp && childMp.Count == 0)
+                {
+                    multipart[i] = new TextPart("plain") { Text = "" };
+                }
+            }
+        }
+
+        return removed;
+    }
+
+    /// <summary>
+    /// MimeEntity のファイル名を、可能な範囲で取得します。
+    /// </summary>
+    /// <param name="entity">MimeEntity です。</param>
+    /// <returns>ファイル名です。無い場合は "" です。</returns>
+    private static string GetMimeEntityFileNameBestEffort(MimeEntity entity)
+    {
+        if (entity == null) throw new ArgumentNullException(nameof(entity));
+
+        try
+        {
+            if (entity is MimePart part)
+            {
+                string? f = part.FileName;
+                if (string.IsNullOrWhiteSpace(f) == false) return f.Trim();
+            }
+        }
+        catch { }
+
+        try
+        {
+            string? f = entity.ContentDisposition?.FileName;
+            if (string.IsNullOrWhiteSpace(f) == false) return f.Trim();
+        }
+        catch { }
+
+        try
+        {
+            string? f = entity.ContentType?.Name;
+            if (string.IsNullOrWhiteSpace(f) == false) return f.Trim();
+        }
+        catch { }
+
+        return "";
+    }
+
+    /// <summary>
+    /// 添付ファイルのバイナリ内容を (Content-Transfer-Encoding をデコードした上で) 取得します。
+    /// </summary>
+    /// <param name="entity">MimeEntity です。</param>
+    /// <param name="bytes">出力バイト列です。</param>
+    /// <returns>取得できた場合は true です。</returns>
+    private static bool TryGetDecodedMimeEntityBytes(MimeEntity entity, out byte[] bytes)
+    {
+        if (entity == null) throw new ArgumentNullException(nameof(entity));
+
+        bytes = Array.Empty<byte>();
+
+        try
+        {
+            if (entity is MimePart part)
+            {
+                if (part.Content == null) return false;
+                using var ms = new MemoryStream();
+                part.Content.DecodeTo(ms);
+                bytes = ms.ToArray();
+                return true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        try
+        {
+            if (entity is MessagePart msgPart && msgPart.Message != null)
+            {
+                bytes = SerializeMimeMessageToBytes(msgPart.Message);
+                return true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// MimeMessage を RFC822 形式のバイト列にシリアライズします。
+    /// </summary>
+    /// <param name="message">MimeMessage です。</param>
+    /// <returns>生メールバイト列です。</returns>
+    private static byte[] SerializeMimeMessageToBytes(MimeMessage message)
+    {
+        if (message == null) throw new ArgumentNullException(nameof(message));
+
+        using var ms = new MemoryStream();
+        message.WriteTo(ms);
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// 危険な拡張子を持つファイルかどうかを判定します。[LA5UBK7L]
+    /// </summary>
+    /// <param name="fileName">ファイル名です。</param>
+    /// <returns>危険と判定した場合は true です。</returns>
+    private static bool HasDangerousFileExtension(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)) return false;
+
+        string s = fileName.Trim().Replace('\\', '/');
+        int slash = s.LastIndexOf('/');
+        if (slash >= 0 && slash + 1 < s.Length) s = s.Substring(slash + 1);
+        s = s.Trim().ToLowerInvariant();
+
+        foreach (string ext in DangerousFileExtensions_LA5UBK7L)
+        {
+            if (s.EndsWith(ext, StringComparison.Ordinal) ||
+                s.EndsWith(ext + ".gz", StringComparison.Ordinal) ||
+                s.EndsWith(ext + ".bz2", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// アーカイブ添付ファイル名かどうかを判定します。[GTFE562C]
+    /// </summary>
+    /// <param name="fileName">ファイル名です。</param>
+    /// <returns>アーカイブと判定した場合は true です。</returns>
+    private static bool IsArchiveFileName(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)) return false;
+        string s = fileName.Trim().ToLowerInvariant();
+
+        return s.EndsWith(".zip", StringComparison.Ordinal) ||
+               s.EndsWith(".tar.gz", StringComparison.Ordinal) ||
+               s.EndsWith(".tgz", StringComparison.Ordinal) ||
+               s.EndsWith(".tar", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// アーカイブ内に危険拡張子ファイル名が含まれているか確認します。[GTFE562C][LA5UBK7L]
+    /// </summary>
+    /// <param name="archiveFileName">アーカイブファイル名です。</param>
+    /// <param name="archiveBytes">アーカイブ本体バイト列です。</param>
+    /// <param name="foundEntryName">見つかったエントリ名です。</param>
+    /// <returns>含まれている場合は true です。</returns>
+    private static bool ArchiveContainsDangerousFileName(string archiveFileName, byte[] archiveBytes, out string foundEntryName)
+    {
+        if (archiveFileName == null) throw new ArgumentNullException(nameof(archiveFileName));
+        if (archiveBytes == null) throw new ArgumentNullException(nameof(archiveBytes));
+
+        foundEntryName = "";
+
+        string s = archiveFileName.Trim().ToLowerInvariant();
+
+        try
+        {
+            if (s.EndsWith(".zip", StringComparison.Ordinal))
+            {
+                using var ms = new MemoryStream(archiveBytes, writable: false);
+                using var zip = new ZipArchive(ms, ZipArchiveMode.Read, leaveOpen: false);
+                foreach (var entry in zip.Entries)
+                {
+                    string name = entry.FullName ?? "";
+                    if (HasDangerousFileExtension(name))
+                    {
+                        foundEntryName = name;
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            if (s.EndsWith(".tar", StringComparison.Ordinal))
+            {
+                using var ms = new MemoryStream(archiveBytes, writable: false);
+                return TarContainsDangerousFileName(ms, out foundEntryName);
+            }
+
+            if (s.EndsWith(".tgz", StringComparison.Ordinal) || s.EndsWith(".tar.gz", StringComparison.Ordinal))
+            {
+                using var ms = new MemoryStream(archiveBytes, writable: false);
+                using var gz = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: false);
+                return TarContainsDangerousFileName(gz, out foundEntryName);
+            }
+        }
+        catch
+        {
+            // パース不能な場合は「危険なし」とみなす (ベストエフォート)
+            foundEntryName = "";
+            return false;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// tar ストリーム内に危険拡張子ファイル名が含まれているか確認します。[GTFE562C][LA5UBK7L]
+    /// </summary>
+    /// <param name="tarStream">tar ストリームです。</param>
+    /// <param name="foundEntryName">見つかったエントリ名です。</param>
+    /// <returns>含まれている場合は true です。</returns>
+    private static bool TarContainsDangerousFileName(Stream tarStream, out string foundEntryName)
+    {
+        if (tarStream == null) throw new ArgumentNullException(nameof(tarStream));
+
+        foundEntryName = "";
+
+        byte[] header = new byte[512];
+
+        while (true)
+        {
+            if (ReadExactlyOrEof(tarStream, header, 0, header.Length) == false)
+            {
+                return false;
+            }
+
+            if (IsAllZero(header))
+            {
+                // 終端 (512 bytes x2 だが、最初の 1 ブロックで十分)
+                return false;
+            }
+
+            string name = ReadNullTerminatedAscii(header, 0, 100);
+            string prefix = ReadNullTerminatedAscii(header, 345, 155);
+            if (string.IsNullOrEmpty(prefix) == false)
+            {
+                name = prefix + "/" + name;
+            }
+
+            if (HasDangerousFileExtension(name))
+            {
+                foundEntryName = name;
+                return true;
+            }
+
+            long size = ParseTarOctal(header, 124, 12);
+            long skip = ((size + 511) / 512) * 512;
+            if (skip > 0)
+            {
+                SkipExactly(tarStream, skip);
+            }
+        }
+    }
+
+    private static bool ReadExactlyOrEof(Stream s, byte[] buf, int offset, int count)
+    {
+        int total = 0;
+        while (total < count)
+        {
+            int r = s.Read(buf, offset + total, count - total);
+            if (r <= 0)
+            {
+                return false;
+            }
+            total += r;
+        }
+        return true;
+    }
+
+    private static void SkipExactly(Stream s, long count)
+    {
+        if (count <= 0) return;
+
+        byte[] tmp = ArrayPool<byte>.Shared.Rent(8192);
+        try
+        {
+            long remaining = count;
+            while (remaining > 0)
+            {
+                int toRead = (int)Math.Min(tmp.Length, remaining);
+                int r = s.Read(tmp, 0, toRead);
+                if (r <= 0)
+                {
+                    throw new EndOfStreamException("APPERROR: Unexpected end of tar stream.");
+                }
+                remaining -= r;
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(tmp);
+        }
+    }
+
+    private static bool IsAllZero(byte[] buf)
+    {
+        foreach (byte b in buf)
+        {
+            if (b != 0) return false;
+        }
+        return true;
+    }
+
+    private static string ReadNullTerminatedAscii(byte[] buf, int offset, int len)
+    {
+        int end = offset;
+        int max = offset + len;
+        while (end < max && buf[end] != 0) end++;
+
+        return Encoding.ASCII.GetString(buf, offset, end - offset).Trim();
+    }
+
+    private static long ParseTarOctal(byte[] buf, int offset, int len)
+    {
+        long n = 0;
+        int end = offset + len;
+
+        for (int i = offset; i < end; i++)
+        {
+            byte b = buf[i];
+            if (b == 0 || b == (byte)' ' || b == (byte)'\t') continue;
+            if (b < (byte)'0' || b > (byte)'7') break;
+
+            n = (n << 3) + (b - (byte)'0');
+        }
+
+        return n;
+    }
+
+    /// <summary>
+    /// 400 Bad Request 時のシステムメッセージを作成します。[GTFE562C][HA7DHHGE]
+    /// </summary>
+    /// <param name="config">設定です。</param>
+    /// <param name="meta">元メールのメタデータです。</param>
+    /// <param name="errorMessage">Gmail API からのエラー応答文字列です。</param>
+    /// <returns>システムメッセージの生メールデータです。</returns>
+    private static byte[] BuildSystemMessageRawMailBytes(ForwardConfig config, MailMetaData meta, string errorMessage)
+    {
+        if (config == null) throw new ArgumentNullException(nameof(config));
+        if (meta == null) throw new ArgumentNullException(nameof(meta));
+        if (errorMessage == null) errorMessage = "";
+
+        MailboxAddress sysMailbox;
+        try
+        {
+            sysMailbox = MailboxAddress.Parse(config.Gmail.GmailSystemMessageMailAddress);
+        }
+        catch (Exception ex)
+        {
+            throw new Exception(LibCommon.AppendExceptionDetail("APPERROR: Invalid gmail.gmail_system_message_mail_address.", ex), ex);
+        }
+
+        string fromStr = meta.AddressList_From?.ToString() ?? "";
+        string subjectInner = $"メール転送インポート失敗: Subject: {meta.Subject} (From: {fromStr})";
+
+        string dtHeader = meta.DateTime_Header?.ToString("yyyy/MM/dd HH:mm:ss zzz", CultureInfo.InvariantCulture) ?? "";
+        string toStr = string.Join(", ", meta.AddressList_To.Select(x => x.ToString()));
+        string ccStr = string.Join(", ", meta.AddressList_Cc.Select(x => x.ToString()));
+
+        string body =
+            "以下のメールを Gmail API を用いて転送インポートしようとしたところ、\n" +
+            $"エラーメッセージ「{errorMessage}」が発生しました。\n" +
+            "\n" +
+            $"メールのサイズ: {meta.MailSize} バイト\n" +
+            $"メールの Subject: {meta.Subject}\n" +
+            $"メールの日時: {dtHeader}\n" +
+            $"メールの From: {fromStr}\n" +
+            $"メールの To: {toStr}\n" +
+            $"メールの Cc: {ccStr}\n" +
+            $"メールの添付ファイルの数: {meta.AttachmentFileNamesList.Count} 個\n";
+
+        var msg = new MimeMessage();
+        msg.Date = DateTimeOffset.Now;
+        msg.From.Add(sysMailbox);
+        msg.To.Add(sysMailbox);
+        msg.MessageId = CreateRandomMessageId(sysMailbox.Address);
+        msg.Subject = "sysmsg " + subjectInner;
+
+        // Return-Path を明示する [HA7DHHGE]
+        try
+        {
+            msg.Headers.Replace(HeaderId.ReturnPath, $"<{sysMailbox.Address}>");
+        }
+        catch { }
+
+        msg.Body = new TextPart("plain")
+        {
+            Text = body,
+        };
+
+        return SerializeMimeMessageToBytes(msg);
+    }
+
+    private static string CreateRandomMessageId(string mailAddress)
+    {
+        if (mailAddress == null) mailAddress = "";
+
+        string domain = "localhost";
+        int at = mailAddress.IndexOf('@');
+        if (at >= 0 && at + 1 < mailAddress.Length)
+        {
+            string d = mailAddress.Substring(at + 1).Trim();
+            if (string.IsNullOrWhiteSpace(d) == false)
+            {
+                domain = d;
+            }
+        }
+
+        string id = Guid.NewGuid().ToString("N");
+        return $"<{id}@{domain}>";
+    }
+
+    /// <summary>
+    /// 危険な拡張子のリストです。[LA5UBK7L]
+    /// </summary>
+    private static readonly HashSet<string> DangerousFileExtensions_LA5UBK7L = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ".ade", ".adp", ".apk", ".appx", ".appxbundle", ".bat", ".cab", ".chm", ".cmd", ".com", ".cpl", ".diagcab", ".diagcfg", ".diagpkg",
+        ".dll", ".dmg", ".ex", ".ex_", ".exe", ".hta", ".img", ".ins", ".iso", ".isp", ".jar", ".jnlp", ".js", ".jse", ".lib", ".lnk",
+        ".mde", ".mjs", ".msc", ".msi", ".msix", ".msixbundle", ".msp", ".mst", ".nsh", ".pif", ".ps1", ".scr", ".sct", ".shb", ".sys",
+        ".vb", ".vbe", ".vbs", ".vhd", ".vxd", ".wsc", ".wsf", ".wsh", ".xll",
+    };
+
+    /// <summary>
+    /// 参照等価性で比較するためのコンパレータです。
+    /// </summary>
+    private sealed class ReferenceEqualityComparer<T> : IEqualityComparer<T> where T : class
+    {
+        public static readonly ReferenceEqualityComparer<T> Instance = new ReferenceEqualityComparer<T>();
+
+        public bool Equals(T? x, T? y) => ReferenceEquals(x, y);
+
+        public int GetHashCode(T obj) => RuntimeHelpers.GetHashCode(obj);
     }
 
     /// <summary>
@@ -1390,7 +2216,18 @@ public static class FeatureForward
             TcpRecvTimeoutSecs = GetRequiredInt(model, "gmail", "tcp_recv_timeout_secs", 1, 3600),
             GmailTokenRefreshIntervalSecs = GetRequiredInt(model, "gmail", "gmail_token_refresh_interval_secs", 1, 3600 * 24),
             GmailMaxMailSize = GetRequiredInt(model, "gmail", "gmail_max_mail_size", 1, 1000_000_000),
+            GmailSystemMessageMailAddress = GetRequiredString(model, "gmail", "gmail_system_message_mail_address"),
         };
+
+        // gmail_system_message_mail_address の妥当性検証 (MimeKit でパース可能であること) [HA7DHHGE]
+        try
+        {
+            _ = MailboxAddress.Parse(cfg.Gmail.GmailSystemMessageMailAddress);
+        }
+        catch (Exception ex)
+        {
+            throw new Exception(LibCommon.AppendExceptionDetail("APPERROR: Invalid TOML value: gmail.gmail_system_message_mail_address", ex), ex);
+        }
 
         return cfg;
     }
@@ -1837,6 +2674,11 @@ public static class FeatureForward
         /// 最大メールバイト数です。
         /// </summary>
         public int GmailMaxMailSize;
+
+        /// <summary>
+        /// システムメッセージの仮想メールアドレスです。[A44FBNFX][HA7DHHGE]
+        /// </summary>
+        public string GmailSystemMessageMailAddress = "";
     }
 
     /// <summary>

@@ -376,3 +376,25 @@ AI 実行コンピュータ名: pc37
 - 既存のラベル付与 (INBOX/UNREAD) および multipart upload 方式は維持した。
 - dotnet build を実施し、コンパイル成功を確認した。
 
+
+
+===================================================================
+日時: 2025/12/18 23:47:57 (JST)
+開発者によって指示された指示の内容: Gmail 400 Bad Request 時の再試行処理 (251218_ZFT79R)
+作業内容の概要: 添付削除再試行とシステムメッセージ import を追加
+AI エンジン: GPT-5.2 (Codex CLI)
+AI 実行コンピュータ名: pc37
+関連タグ: 251218_ZFT79R, ULP8TK5N, GTFE562C, LA5UBK7L, HA7DHHGE, A44FBNFX
+編集したファイルの一覧: feature_forward.cs, secret_config.txt
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): FeatureForward.GmailApiImportAsync(), FeatureForward.GmailApiImportRawMessageWithRetriesAsync(), FeatureForward.TryBuildMailBytesForBadRequestStepA(), FeatureForward.TryBuildMailBytesForBadRequestStepB(), FeatureForward.TryBuildMailBytesForBadRequestStepC(), FeatureForward.BuildSystemMessageRawMailBytes(), FeatureForward.GmailConfig.GmailSystemMessageMailAddress
+実装において迷った点 (もしあれば): HA7DHHGE の「システムメッセージ import 失敗時」の扱い (例外にするか)
+参考文献 (複数あってよい): なし
+
+
+【詳細】
+- 指示 251218_ZFT79R / 仕様 [ULP8TK5N] に従い、Gmail import が 400 Bad Request の場合に、添付ファイル削除処理 [GTFE562C] を用いて再試行する処理を追加した。
+- (a) 危険拡張子 [LA5UBK7L] の添付を削除したメール、(b) 危険ファイル名を含む .zip/.tar.gz/.tgz/.tar 添付を削除したメール、(c) 全添付削除メールの順に users.messages.import を再試行し、いずれか成功したら成功として扱うようにした。
+- (a)(b)(c) で全て 400 の場合は、代替としてシステムメッセージ [HA7DHHGE] を生成し import するようにし、成功時は呼び出し元で Error ログを出力するようにした。
+- 設定ファイル [A44FBNFX] の必須項目 `gmail_system_message_mail_address` を読み込むようにし、secret_config.txt にも追記した。
+- dotnet build を実施し、コンパイル成功を確認した。
+

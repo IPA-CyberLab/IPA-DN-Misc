@@ -114,6 +114,9 @@ gmail_token_refresh_interval_secs = 15
 # [必須] 最大メールバイト数
 gmail_max_mail_size = 40000000
 
+# [必須] システムメッセージの仮想メールアドレス
+gmail_system_message_mail_address = "nobody <nobody@example.org>"
+
 
 --- [A44FBNFX] ここまで ---
 
@@ -161,12 +164,13 @@ gmail_max_mail_size = 40000000
    
    [B] Gmail API を呼び出すためのクレデンシャルは、[F3QBRBA9] で作成された、[A44FBNFX] 内の 「token_json」に指定されている JSON ファイルを使用すること。この JSON ファイルをまず読み取りで読む。LastRefreshDt よりも gmail_token_refresh_interval_secs 秒以上経過していたら、トークンの更新処理行なう。トークンの更新処理で新しいトークンが得られたら、「token_json」に指定されている JSON ファイルにそのトークンを書き込むこと。
    
-   [C] Gmail API では、「users.messages.import」 API を用いて、この 1 件のメールのデータ ((a) で取得したものそのまま) を、「INBOX」「UNREAD」というラベルを確実に付けた上で、ユーザーの Gmail 受信トレイに書き込む。
+   [C] Gmail API では、「users.messages.import」 API を用いて、この 1 件のメールのデータ ((a) で取得したものそのまま) を、「INBOX」「UNREAD」というラベルを確実に付けた上で、ユーザーの Gmail 受信トレイに書き込む。[T3C34TDJ]
       - インポート時は、neverMarkSpam=True オプションを有効にすること。[N9YQARM8]
 
   Info ログとして、書き込み対象メールの MailSize、DateTime_Received、AddressList_From、AddressList_To、Subject、MessageId と、これが Gmail メールボックスに書き込み完了した旨を、わかりやすく、出力する。
    
    [D] [C] の書き込みがエラーなく完了したことをもって、(d) へ行く。なお、何らかのエラーが発生した場合は、例外を発生させ、この時点でプログラムを終了させる。
+   ただし、Gmail に 1 件のメールをアップロードしようとして、「400 Bad Request」が応答された場合、必要に応じた添付ファイルの削除処理 [GTFE562C] を行ない、それでもなおエラーになる場合のみ、例外を発生させ、この時点でプログラムを終了させる。[ULP8TK5N]
 
  (d) 最後に、POP3 サーバーから、対象メールを削除する処理を行なう。
   Info ログとして、書き込み対象メールの MailSize、DateTime_Received、AddressList_From、AddressList_To、Subject、MessageId と、これを POP3 サーバーから削除した旨を、わかりやすく、出力する。
@@ -253,6 +257,50 @@ Received: by mail-qv1-f48.google.com with SMTP id aaaa-bbbba.0
 (2) (1) のパーサーについて、「MimeKit」のライブラリにその揺れの吸収が可能な機能があり、かつ、それが信頼できる場合は、それを利用すること。
 
 
+93. Gmail メールをアップロードしようとして、「400 Bad Request」が応答された場合の、必要に応じた添付ファイルの削除処理 [GTFE562C]
+(1) Gmail にウイルス等の疑いがあるメール (添付ファイル付きメール、本文にマルウェアの URL が記載されているメール等) をアップロードしようとすると、「400 Bad Request」というエラーが Gmail API から応答されることがある。
+(2) この場合、以下の (a), (b), (c) のメールを内部的にメモリ上で作成し、順に、インポートを再試行する。(a), (b), (c) の順で、1 つでもインポートが成功すれば、残りは不要である。
+   (a) メールから、[LA5UBK7L] の拡張子を有するファイル名 (あるいはこれらのファイル名に .gz または .bz2 が付いたファイル名) のすべての添付ファイルを削除したもの。この処理は MimeKit で可能である。
+   (b) メールに .zip, .tar.gz, .tgz, .tar のアーカイブファイルが付いている場合は、その内容を走査して (ファイルの内容そのものは読まず、ファイル名だけ読めば良い)、それらの中に、[LA5UBK7L] の拡張子を有するファイル名 (あるいはこれらのファイル名に .gz または .bz2 が付いたファイル名) がある場合は、その添付ファイルたるアーカイブファイルを削除したもの。この処理は MimeKit で可能である。
+   (c) メールからすべての添付ファイルを削除したもの。この処理は MimeKit で可能である。
+   なお、(a), (b), (c) において、メールの「Subject」文字列には、「【注: 転送時に添付ファイル削除】 ○○」という文字列を前置すること (○○ は元の Subject 文字列)。元の Subject 文字列がない場合、「○○」の部分は空文字にすること。
+(3) (2) で、すべてのインポートで、「400 Bad Request」が応答された場合は、代わりに「システムメッセージ」 ([HA7DHHGE]) を作成し、これをメールボックスにインポートする。システムメッセージの [件名] は、[L58QWMGX] とし、 <> の部分は指示に従って埋める。本文は、[G35AJFPZ] とし、<> の部分は指示に従って埋める。
+(4) システムメッセージのインポートに成功した場合、Error ログとして、書き込み対象メールの MailSize、DateTime_Received、AddressList_From、AddressList_To、Subject、MessageId と、"Gmail サーバーへのインポートに失敗した" 旨を、わかりやすく、出力する。
+(5) (2) または (3) でインポートに成功したら、そのメールの Gmail へのインポートは成功したとみなす。それ以外の場合は、エラーとみなす。
+
+--- [LA5UBK7L] ここから ---
+.ade, .adp, .apk, .appx, .appxbundle, .bat, .cab, .chm, .cmd, .com, .cpl, .diagcab, .diagcfg, .diagpkg, .dll, .dmg, .ex, .ex_, .exe, .hta, .img, .ins, .iso, .isp, .jar, .jnlp, .js, .jse, .lib, .lnk, .mde, .mjs, .msc, .msi, .msix, .msixbundle, .msp, .mst, .nsh, .pif, .ps1, .scr, .sct, .shb, .sys, .vb, .vbe, .vbs, .vhd, .vxd, .wsc, .wsf, .wsh, .xll,
+--- [LA5UBK7L] ここまで ---
+
+--- [L58QWMGX] ここから ---
+メール転送インポート失敗: Subject: <○○○> (From: <AddressList_From>)
+--- [L58QWMGX] ここまで ---
+
+--- [G35AJFPZ] ここから ---
+以下のメールを Gmail API を用いて転送インポートしようとしたところ、
+エラーメッセージ「ERROR」が発生しました。
+
+メールのサイズ: <XXX> バイト
+メールの Subject: <○○○>
+メールの日時: <DateTime_Header を文字列化したもの>
+メールの From: <AddressList_From を文字列化したもの>
+メールの To: <AddressList_To (複数あるときは ", " で結合) を文字列化したもの>
+メールの Cc: <AddressList_Cc (複数あるときは ", " で結合) を文字列化したもの>
+メールの添付ファイルの数: <○> 個
+--- [G35AJFPZ] ここまで ---
+
+
+93-2. Gmail へのシステムメッセージのアップロード [HA7DHHGE]
+(1) システムメッセージのメールは、次のとおりとする。
+- From, To はいずれも [A44FBNFX] の gmail_system_message_mail_address の文字列とする。
+- ReturnPath は gmail_system_message_mail_address の文字列のうちメールアドレス部分 ( "<username@example.org>" あるいは "aaa bbb <username@example.org>" の形式で元メールに入っている場合、メールアドレス部分、すなわち "<>" を除外した "username@example.org" の部分のみを格納せよ。) とする。
+- MessageId は RFC に準拠し乱数で絶対重複しない ID 文字列を生成して格納すること。
+- Subject は「sysmsg [件名]」とする。
+- Body はテキスト文字列とする。
+- エンコーディングは UTF-8 とする。
+- Date は、そのメッセージを作成した日時とする。
+(2) (1) で作成したシステムメッセージは、[T3C34TDJ] と同等の方法でインポートすること。これにより、ユーザーは、メールボックスを通じて、そのメールを確認できる。
+(3) (2) のインポート時に、万一システムメッセージのインポートでエラーが発生したら、その旨は Error ログとして記録するが、例外はキャッチし、無視して続行する。
 
 
 
