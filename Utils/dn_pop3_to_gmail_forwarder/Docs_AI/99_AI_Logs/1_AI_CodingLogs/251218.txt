@@ -272,3 +272,25 @@ AI 実行コンピュータ名: pc37
 
 
 
+===================================================================
+日時: 2025/12/18 21:44:29 (JST)
+開発者によって指示された指示の内容: Date/Received 日時パース改善 (YU4CRZ2B/KDXFFA9U)
+作業内容の概要: MimeKit DateUtils を用い日時抽出を堅牢化
+AI エンジン: GPT-5.2 (Codex CLI)
+AI 実行コンピュータ名: pc37
+関連タグ: 251218_XLVF4A, YU4CRZ2B, KDXFFA9U, C993C7RT
+編集したファイルの一覧: feature_forward.cs
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): FeatureForward.TryGetDateHeaderDateTime(), FeatureForward.TryParseRfc822DateTimeBestEffort(), FeatureForward.NormalizeDateTimeTextForParsing(), FeatureForward.TryNormalizeTimeZoneToken(), FeatureForward.TryExtractDatePartFromReceivedHeader(), FeatureForward.TryGetReceivedDateTime()
+実装において迷った点 (もしあれば): Received は最上段(直近)を採用する方針を維持しつつ、';' 以降の日時抽出とコメント除去を強化
+参考文献 (複数あってよい): なし
+
+
+【詳細】
+- 指示 251218_XLVF4A に従い、仕様 [YU4CRZ2B] (Date ヘッダ) と [KDXFFA9U] (Received ヘッダ) の日時取得処理を改良した。
+- Date ヘッダは、生ヘッダ値を優先して取得し、MimeKit の rfc822 日時パーサ (MimeKit.Utils.DateUtils.TryParse) を用いてベストエフォートで DateTime_Header を設定するようにした。
+- Received ヘッダは、ヘッダ末尾の ';' 以降を日時部分として抽出し、改行/コメント(括弧)除去・空白正規化・タイムゾーン略称補正を行った上で DateUtils.TryParse を用いて解析するようにした。これにより [C993C7RT] 形式(末尾に (JST) 等のコメントが付く)の確実なパースを狙う。
+- ビルド確認として dotnet build を実施し、コンパイル成功を確認した。（--no-restore では環境由来の fallback package folder エラーが出る場合があるため、restore を含めて実施）
+
+
+
+

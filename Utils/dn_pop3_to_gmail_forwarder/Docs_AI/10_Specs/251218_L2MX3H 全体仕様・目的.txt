@@ -54,7 +54,7 @@ log_dir = "data/log/"
 hostname = "pop3.example.org"
 
 # [必須] POP3 サーバーの TCP ポート番号
-port = 993
+port = 995
 
 # [必須] SSL 使用モード (none = 未使用, starttls = 使用し、かつ START TLS モード, full = 使用し、かつ TCP 接続時から SSL でラップ)
 ssl_mode = "full"
@@ -210,9 +210,9 @@ public class MailMetaData
     
     public string Subject; // Subject の文字列。デコード済み。無い場合は ""。
     
-    public DateTimeOffset? DateTime_Header; // Date ヘッダの日時。不明な場合は null。
+    public DateTimeOffset? DateTime_Header; // Date ヘッダの日時。不明な場合は null。注意: [YU4CRZ2B] を参照。
     
-    public DateTimeOffset? DateTime_Received; // Received ヘッダから推定されるメールの配信日時。不明な場合は null。
+    public DateTimeOffset? DateTime_Received; // Received ヘッダから推定されるメールの配信日時。不明な場合は null。注意: [KDXFFA9U] を参照。
     
     public string MessageId; // メッセージ ID 文字列。無い場合は ""。
     
@@ -231,6 +231,25 @@ public class MailMetaData
     public List<string> AttachmentFileNamesList; // 添付ファイル名のリスト。存在しない場合は空のリスト。なお、HTML メールの場合、HTML 本文や HTML 本文内の画像などが含まれている場合があるが、これらは添付ファイルとしてはここに入れないこと。普通のメーラにおいて、「添付ファイル」であるとみなされるものが、添付ファイルである。
 }
 --- ここまで ---
+
+92-2. Received ヘッダから日時を取得する際の注意 [KDXFFA9U]
+(1) メールの Received ヘッダの表記方法には、歴史的経緯から、色々な揺れがある可能性がある。その揺れについて詳しくリサーチし、それを解消して、確実に日時が取得できる方法によるパーサーを作成すること。
+(2) 一例として、[C993C7RT] のようなメールがみられる。[C993C7RT] のようなものは、確実にパースできるようにすること。他にも色々トラブル原因あると思うので、インターネットで色々な方言について調査研究し、良いパーサーを書くこと。
+
+--- [C993C7RT] ここから ---
+Received: from mail-qv1-f48.google.com (mail-qv1-f48.google.com [209.85.219.48])
+	by example.org (Postfix) with ESMTPS id 5D64D1292BDF
+	for <example.org@example.org>; Thu, 18 Dec 2025 20:45:02 +0900 (JST)
+Received: by mail-qv1-f48.google.com with SMTP id aaaa-bbbba.0
+        for <example.org@example.org>; Thu, 18 Dec 2025 03:45:02 -0800 (PST)
+--- [C993C7RT] ここまで ---
+
+
+92-3. Date ヘッダから日時を取得する際の注意 [YU4CRZ2B]
+(1) メールの Date ヘッダの表記方法には、歴史的経緯から、色々な揺れがある可能性がある。その揺れについて詳しくリサーチし、それを解消して、確実に日時が取得できる方法によるパーサーを作成すること。
+(2) (1) のパーサーについて、「MimeKit」のライブラリにその揺れの吸収が可能な機能があり、かつ、それが信頼できる場合は、それを利用すること。
+
+
 
 
 

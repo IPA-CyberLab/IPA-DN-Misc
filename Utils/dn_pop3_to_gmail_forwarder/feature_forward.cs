@@ -27,6 +27,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using MimeKit;
+using MimeKit.Utils;
 using Newtonsoft.Json;
 using Tomlyn;
 using Tomlyn.Model;
@@ -264,13 +265,10 @@ public static class FeatureForward
             }
             catch { }
 
-            // Date header (信頼性は低いが格納する)
+            // Date header (信頼性は低いが格納する) [YU4CRZ2B]
             try
             {
-                if (message.Date != DateTimeOffset.MinValue)
-                {
-                    meta.DateTime_Header = message.Date;
-                }
+                meta.DateTime_Header = TryGetDateHeaderDateTime(message);
             }
             catch { }
 
@@ -411,6 +409,254 @@ public static class FeatureForward
     }
 
     /// <summary>
+    /// Date ヘッダから日時を取得します。[YU4CRZ2B]
+    /// </summary>
+    /// <param name="message">MimeKit のメールオブジェクトです。</param>
+    /// <returns>取得できた日時です。取得できない場合は null です。</returns>
+    private static DateTimeOffset? TryGetDateHeaderDateTime(MimeMessage message)
+    {
+        if (message == null) throw new ArgumentNullException(nameof(message));
+
+        // ★ Date ヘッダは様々な「方言」があり得るため、まずは生の Date ヘッダ値を MimeKit の DateUtils でパースする [YU4CRZ2B]
+        string? rawDateHeader = GetHeaderValues(message, "Date").FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(rawDateHeader) == false)
+        {
+            if (TryParseRfc822DateTimeBestEffort(rawDateHeader!, out DateTimeOffset dto))
+            {
+                return dto;
+            }
+        }
+
+        // ★ MimeKit が解析済みの Date も併用する (生ヘッダが無い/解析不能の場合のフォールバック) [YU4CRZ2B]
+        try
+        {
+            if (message.Date != DateTimeOffset.MinValue)
+            {
+                return message.Date;
+            }
+        }
+        catch { }
+
+        return null;
+    }
+
+    /// <summary>
+    /// rfc822 形式の日時文字列を、ベストエフォートでパースします。[YU4CRZ2B][KDXFFA9U]
+    /// </summary>
+    /// <param name="text">入力文字列です。</param>
+    /// <param name="dateTime">出力日時です。</param>
+    /// <returns>パースに成功した場合は true です。</returns>
+    private static bool TryParseRfc822DateTimeBestEffort(string text, out DateTimeOffset dateTime)
+    {
+        dateTime = default;
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        string normalized = NormalizeDateTimeTextForParsing(text);
+
+        if (DateUtils.TryParse(normalized, out dateTime))
+        {
+            return true;
+        }
+
+        // タイムゾーン略称を、数値オフセットに置換/除去して再試行する
+        if (TryNormalizeTimeZoneToken(normalized, out string tzNormalized))
+        {
+            if (DateUtils.TryParse(tzNormalized, out dateTime))
+            {
+                return true;
+            }
+        }
+
+        // 最後のフォールバックとして .NET の TryParse を利用する
+        if (DateTimeOffset.TryParse(normalized, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out dateTime))
+        {
+            return true;
+        }
+
+        if (TryNormalizeTimeZoneToken(normalized, out string tzNormalized2) &&
+            DateTimeOffset.TryParse(tzNormalized2, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out dateTime))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 日時文字列をパースしやすい形に正規化します。(改行の除去、コメント除去、空白正規化) [YU4CRZ2B][KDXFFA9U]
+    /// </summary>
+    /// <param name="text">入力文字列です。</param>
+    /// <returns>正規化後文字列です。</returns>
+    private static string NormalizeDateTimeTextForParsing(string text)
+    {
+        if (text == null) throw new ArgumentNullException(nameof(text));
+
+        // unfold: CRLF / LF をスペースにする
+        string s = text.Replace("\r\n", "\n").Replace("\r", "\n");
+        s = s.Replace("\n", " ");
+
+        // コメント ( ... ) を除去
+        s = RemoveParenthesizedComments(s);
+
+        // 空白の正規化
+        s = NormalizeWhitespaceToSingleSpace(s);
+
+        return s.Trim();
+    }
+
+    /// <summary>
+    /// () で囲まれたコメントを除去します。(ネスト対応) [YU4CRZ2B][KDXFFA9U]
+    /// </summary>
+    /// <param name="s">入力文字列です。</param>
+    /// <returns>コメント除去後文字列です。</returns>
+    private static string RemoveParenthesizedComments(string s)
+    {
+        if (s == null) throw new ArgumentNullException(nameof(s));
+
+        var sb = new StringBuilder(s.Length);
+        int depth = 0;
+
+        foreach (char c in s)
+        {
+            if (c == '(')
+            {
+                depth++;
+                continue;
+            }
+            if (c == ')')
+            {
+                if (depth > 0) depth--;
+                continue;
+            }
+
+            if (depth == 0)
+            {
+                sb.Append(c);
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 連続空白やタブ等を 1 個の半角スペースに正規化します。
+    /// </summary>
+    /// <param name="s">入力文字列です。</param>
+    /// <returns>正規化後文字列です。</returns>
+    private static string NormalizeWhitespaceToSingleSpace(string s)
+    {
+        if (s == null) throw new ArgumentNullException(nameof(s));
+
+        var sb = new StringBuilder(s.Length);
+        bool lastWasSpace = false;
+
+        foreach (char c in s)
+        {
+            if (char.IsWhiteSpace(c))
+            {
+                if (lastWasSpace == false)
+                {
+                    sb.Append(' ');
+                    lastWasSpace = true;
+                }
+            }
+            else
+            {
+                sb.Append(c);
+                lastWasSpace = false;
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 日時文字列末尾のタイムゾーン略称を、数値オフセットに置換または除去します。[KDXFFA9U][YU4CRZ2B]
+    /// </summary>
+    /// <param name="src">入力文字列です。</param>
+    /// <param name="normalized">出力文字列です。</param>
+    /// <returns>置換/除去を行った場合は true です。</returns>
+    private static bool TryNormalizeTimeZoneToken(string src, out string normalized)
+    {
+        if (src == null) throw new ArgumentNullException(nameof(src));
+
+        normalized = src;
+
+        string[] parts = src.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2) return false;
+
+        string last = parts[^1];
+
+        // 末尾が英字のみ (例: JST, PST, GMT) でなければ対象外
+        if (last.Length < 2 || last.Length > 6) return false;
+        if (last.All(char.IsLetter) == false) return false;
+
+        // すでに直前が数値オフセットなら、末尾略称は無視する (例: +0900 JST)
+        if (LooksLikeNumericTimeZoneOffset(parts[^2]))
+        {
+            normalized = string.Join(' ', parts.Take(parts.Length - 1));
+            return true;
+        }
+
+        string? offset = last.ToUpperInvariant() switch
+        {
+            "UT" => "+0000",
+            "UTC" => "+0000",
+            "GMT" => "+0000",
+            "JST" => "+0900",
+            "KST" => "+0900",
+            "PST" => "-0800",
+            "PDT" => "-0700",
+            "MST" => "-0700",
+            "MDT" => "-0600",
+            "CST" => "-0600",
+            "CDT" => "-0500",
+            "EST" => "-0500",
+            "EDT" => "-0400",
+            _ => null,
+        };
+
+        if (offset == null) return false;
+
+        parts[^1] = offset;
+        normalized = string.Join(' ', parts);
+        return true;
+    }
+
+    /// <summary>
+    /// 文字列が数値タイムゾーンオフセット (例: +0900, -0800, +09:00) かどうかを判定します。
+    /// </summary>
+    /// <param name="s">入力文字列です。</param>
+    /// <returns>数値オフセット形式なら true です。</returns>
+    private static bool LooksLikeNumericTimeZoneOffset(string s)
+    {
+        if (s == null) throw new ArgumentNullException(nameof(s));
+
+        s = s.Trim();
+        if (s.Length < 5) return false;
+
+        if (s[0] != '+' && s[0] != '-') return false;
+
+        // +HHMM
+        if (s.Length == 5)
+        {
+            return char.IsDigit(s[1]) && char.IsDigit(s[2]) && char.IsDigit(s[3]) && char.IsDigit(s[4]);
+        }
+
+        // +HH:MM
+        if (s.Length == 6 && s[3] == ':')
+        {
+            return char.IsDigit(s[1]) && char.IsDigit(s[2]) && char.IsDigit(s[4]) && char.IsDigit(s[5]);
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Received ヘッダから配信日時を推定します。
     /// </summary>
     /// <param name="message">MimeKit のメールオブジェクトです。</param>
@@ -424,18 +670,52 @@ public static class FeatureForward
         foreach (var h in receivedHeaders)
         {
             string v = h.Value ?? "";
-            int idx = v.LastIndexOf(';');
-            if (idx >= 0 && idx + 1 < v.Length)
+
+            // ★ Received ヘッダは多様な方言があるため、まずは末尾の ';' 以降を抽出し、rfc822 日時としてベストエフォート解析する [KDXFFA9U]
+            if (TryExtractDatePartFromReceivedHeader(v, out string datePart))
             {
-                string datePart = v.Substring(idx + 1).Trim();
-                if (DateTimeOffset.TryParse(datePart, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var dto))
+                if (TryParseRfc822DateTimeBestEffort(datePart, out DateTimeOffset dto))
                 {
                     return dto;
+                }
+            }
+            else
+            {
+                // ';' が無い場合などのフォールバック
+                if (TryParseRfc822DateTimeBestEffort(v, out DateTimeOffset dto2))
+                {
+                    return dto2;
                 }
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Received ヘッダ値から、末尾の日時部分 (通常は最後の ';' 以降) を抽出します。[KDXFFA9U]
+    /// </summary>
+    /// <param name="receivedHeaderValue">Received ヘッダ値です。</param>
+    /// <param name="datePart">抽出された日時部分です。</param>
+    /// <returns>抽出できた場合は true です。</returns>
+    private static bool TryExtractDatePartFromReceivedHeader(string receivedHeaderValue, out string datePart)
+    {
+        if (receivedHeaderValue == null) throw new ArgumentNullException(nameof(receivedHeaderValue));
+
+        datePart = "";
+
+        if (string.IsNullOrWhiteSpace(receivedHeaderValue)) return false;
+
+        // unfold + コメント除去してから最後の ';' を探す
+        string s = receivedHeaderValue.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", " ");
+        s = RemoveParenthesizedComments(s);
+
+        int idx = s.LastIndexOf(';');
+        if (idx < 0 || idx + 1 >= s.Length) return false;
+
+        datePart = s.Substring(idx + 1).Trim();
+
+        return string.IsNullOrWhiteSpace(datePart) == false;
     }
 
     /// <summary>

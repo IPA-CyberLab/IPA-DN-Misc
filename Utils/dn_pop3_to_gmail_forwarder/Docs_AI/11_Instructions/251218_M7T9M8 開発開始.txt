@@ -20,3 +20,6 @@ Main() で起動時に "Hello World" と表示するコードを先頭に追加�
 251218_X738HN:
 設定ファイル [A44FBNFX] に新設された項目「ssl_trusted_static_hash_list」に対応せよ。
 
+251218_XLVF4A:
+[YU4CRZ2B] と [KDXFFA9U] の点を改良せよ。
+
