@@ -128,3 +128,74 @@ AI 実行コンピュータ名: pc37
   残っていない場合がある。
 
 
+
+===================================================================
+日時: 2025/12/18 17:06:54 (JST)
+開発者によって指示された指示の内容: 251218_QX4C82 (規約 101. JSON 適用と共通処理切り出し)
+作業内容の概要: JSON 規約適用状況を点検し、lib_common.cs への共通化を確認
+AI エンジン: GPT-5.2 / 推論レベル: 既定
+AI 実行コンピュータ名: pc37
+関連タグ: 251218_QX4C82, PV4U3JTR, BZAMWB56, E64UYSSZ, 251216_VP33AH
+編集したファイルの一覧:
+- なし
+実装または変更したクラスやメソッド名の一覧 (複数あってよい):
+- (変更なし) LibCommon.CreateStandardJsonSerializerSettings / BuildSingleJsonFileText
+- (変更なし) LibCommon.WriteSingleJsonFileByTempAsync / ReadSingleJsonFileAsync
+- (変更なし) FeatureGetToken.WriteTokenFileAsync
+実装において迷った点 (もしあれば):
+- なし
+参考文献 (複数あってよい):
+- なし
+
+
+1. 指示の解釈
+- 251218_QX4C82 は、規約「101. JSON [PV4U3JTR]」(Newtonsoft.Json の利用、標準設定、
+  JSON 設定ファイルの BOM/LF/前後改行規約、読み取り時の BOM・改行混在対応) を適用し、
+  その処理を共通ライブラリとして切り出すことを要求する。
+- また、ソース分割指示 [BZAMWB56], [E64UYSSZ] により、共通ユーティリティは lib_common.cs に
+  まとめる必要がある。
+
+2. 現状調査結果
+- リポジトリ内の JSON 入出力は lib_common.cs の LibCommon に集約されていた。
+  - CreateStandardJsonSerializerSettings(): 規約 (3) の JsonSerializerSettings を実装。
+  - BuildSingleJsonFileText(): 規約 (2)(4) の整形 (Indented) と LF 正規化、前後改行を実装。
+  - WriteSingleJsonFileByTempAsync(): 規約 (4) の UTF-8 BOM 付与 + テンポラリ経由の安全な置換。
+  - ReadSingleJsonFileAsync<T>(): 規約 (5) の BOM 有無対応、および Trim による前後改行吸収。
+- feature_gettoken.cs のトークン保存処理は WriteTokenFileAsync() から
+  LibCommon.WriteSingleJsonFileByTempAsync() を呼び出しており、共通化が完了していた。
+- System.Text.Json の使用や、独自に JSON ファイルを直接 Read/Write している箇所は確認されなかった。
+
+3. ビルド確認
+- BuildTest.txt の指示に従い dotnet build を実行し、コンパイル成功を確認した。
+
+
+
+
+===================================================================
+日時: 2025/12/18 18:09:46 (JST)
+開発者によって指示された指示の内容: PV4U3JTR 適用を共通処理へ切り出し
+作業内容の概要: JSON 設定/ファイル入出力の共通化と gettoken への適用
+AI エンジン: GPT-5.2 (Codex CLI)
+AI 実行コンピュータ名: Unknown (from Codex CLI container)
+関連タグ: 251218_QX4C82, PV4U3JTR, BZAMWB56, E64UYSSZ
+編集したファイルの一覧: lib_common.cs, feature_gettoken.cs, NuGet.Config, dn_pop3_to_gmail_forwarder.csproj, obj/project.assets.json
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): LibCommon, LibCommon.CreateStandardJsonSerializerSettings(), LibCommon.BuildSingleJsonFileText(), LibCommon.WriteSingleJsonFileByTempAsync(), FeatureGetToken.WriteTokenFileAsync()
+実装において迷った点 (もしあれば): なし
+参考文献 (複数あってよい): なし
+
+
+【詳細】
+- 指示 251218_QX4C82 に従い、コーディング規約 101. JSON [PV4U3JTR] の内容をプロジェクト内に適用した。
+- 既存の gettoken 実装では JSON ファイル書き込みが (BOM 無し・改行/前後改行規約未対応) だったため、共通ライブラリに切り出して規約準拠に統一した。
+
+【実装内容】
+- lib_common.cs に LibCommon を追加し、Newtonsoft.Json の標準 JsonSerializerSettings と、単一 JSON ファイルの規約フォーマット(先頭2行改行/末尾3行改行、LF統一、UTF-8 BOM付与)に基づく入出力ユーティリティを実装した。
+- feature_gettoken.cs のトークン JSON 保存処理を、LibCommon.WriteSingleJsonFileByTempAsync() を用いるように変更し、規約準拠の出力に統一した。
+
+【ビルド確認】
+- 当初、Linux 環境で dotnet build が Windows パスの fallback package folder を参照して失敗した。原因は、既存の assets/lockfile が Windows 環境由来であったためと判断し、dotnet restore を実施して lockfile を再生成した。
+- その後 dotnet build に成功し、コンパイルエラー無しを確認した。
+
+
+
+
