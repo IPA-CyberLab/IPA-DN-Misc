@@ -2032,7 +2032,7 @@ public static class FeatureForward
         }
 
         string fromStr = meta.AddressList_From?.ToString() ?? "";
-        string subjectInner = $"メール転送インポート失敗: Subject: {meta.Subject} (From: {fromStr})";
+        string subjectInner = $"【メール転送インポート失敗】: Subject: {meta.Subject} (From: {fromStr})";
 
         string dtHeader = meta.DateTime_Header?.ToString("yyyy/MM/dd HH:mm:ss zzz", CultureInfo.InvariantCulture) ?? "";
         string toStr = string.Join(", ", meta.AddressList_To.Select(x => x.ToString()));

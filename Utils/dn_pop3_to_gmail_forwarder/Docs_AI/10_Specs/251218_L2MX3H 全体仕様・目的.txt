@@ -273,7 +273,7 @@ Received: by mail-qv1-f48.google.com with SMTP id aaaa-bbbba.0
 --- [LA5UBK7L] ここまで ---
 
 --- [L58QWMGX] ここから ---
-メール転送インポート失敗: Subject: <○○○> (From: <AddressList_From>)
+【メール転送インポート失敗】: Subject: <○○○> (From: <AddressList_From>)
 --- [L58QWMGX] ここまで ---
 
 --- [G35AJFPZ] ここから ---
