@@ -25,7 +25,6 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Security.Cryptography;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace dn_pop3_to_gmail_forwarder;
@@ -373,35 +372,8 @@ public static class FeatureGetToken
     /// <returns>完了タスクです。</returns>
     private static async Task WriteTokenFileAsync(string saveAsFullPath, GMailOAuthTokenJsonData data, CancellationToken cancel)
     {
-        string? dir = Path.GetDirectoryName(saveAsFullPath);
-        if (string.IsNullOrEmpty(dir) == false)
-        {
-            Directory.CreateDirectory(dir);
-        }
-
-        string tmpPath = saveAsFullPath + ".tmp_" + Guid.NewGuid().ToString("N");
-
-        string json = JsonConvert.SerializeObject(data, CreateJsonSettings());
-
-        await File.WriteAllTextAsync(tmpPath, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancel).ConfigureAwait(false);
-        File.Move(tmpPath, saveAsFullPath, overwrite: true);
-    }
-
-    /// <summary>
-    /// Newtonsoft.Json 用の標準シリアライズ設定を作成します。
-    /// </summary>
-    /// <returns>シリアライズ設定です。</returns>
-    private static JsonSerializerSettings CreateJsonSettings()
-    {
-        return new JsonSerializerSettings
-        {
-            MaxDepth = 8,
-            NullValueHandling = NullValueHandling.Ignore,
-            ReferenceLoopHandling = ReferenceLoopHandling.Error,
-            PreserveReferencesHandling = PreserveReferencesHandling.None,
-            StringEscapeHandling = StringEscapeHandling.Default,
-            Formatting = Formatting.Indented,
-        };
+        // ★ JSON 書き出し規約 [PV4U3JTR] を共通処理化したものを使用する
+        await LibCommon.WriteSingleJsonFileByTempAsync(saveAsFullPath, data, cancel).ConfigureAwait(false);
     }
 
     /// <summary>
