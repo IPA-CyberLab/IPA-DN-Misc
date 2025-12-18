@@ -125,11 +125,21 @@ public class Program
             context.ExitCode = await FeatureGetToken.RunAsync(options).ConfigureAwait(false);
         });
 
-        var forwardCommand = new Command("forward", "Forward mode (not implemented yet).");
-        forwardCommand.SetHandler((InvocationContext context) =>
+        var forwardCommand = new Command("forward", "Forward mode: import POP3 mailbox messages into Gmail.");
+
+        var configOption = new Option<string>("--config", "Forward mode TOML config file path.") { IsRequired = true };
+        forwardCommand.AddOption(configOption);
+
+        forwardCommand.SetHandler(async (InvocationContext context) =>
         {
-            Console.Error.WriteLine("APPERROR: forward mode is not implemented yet.");
-            context.ExitCode = 1;
+            string configPath = context.ParseResult.GetValueForOption(configOption) ?? "";
+
+            var options = new FeatureForward.ForwardOptions
+            {
+                ConfigPath = configPath,
+            };
+
+            context.ExitCode = await FeatureForward.RunAsync(options).ConfigureAwait(false);
         });
 
         root.AddCommand(getTokenCommand);

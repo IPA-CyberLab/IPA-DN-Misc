@@ -199,3 +199,33 @@ AI 実行コンピュータ名: Unknown (from Codex CLI container)
 
 
 
+===================================================================
+日時: 2025/12/18 20:20:35 (JST)
+開発者によって指示された指示の内容: forward モード [AC579L84] を実装 (251218_VZU2SN)
+作業内容の概要: TOML 設定/POP3取得/アーカイブ/Gmail import/ログ/更新トークン
+AI エンジン: GPT-5.2 (Codex CLI)
+AI 実行コンピュータ名: pc37
+関連タグ: 251218_VZU2SN, AC579L84, A44FBNFX, Y5CRNZA3, Q9MZU6D5, VZR2Y5BY, F3QBRBA9, EG8R7RTE
+編集したファイルの一覧: dn_pop3_to_gmail_forwarder.cs, feature_forward.cs, feature_gettoken.cs, dn_pop3_to_gmail_forwarder.csproj, obj/project.assets.json
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): FeatureForward.RunAsync(), FeatureForward.Pop3Client, FeatureForward.ForwardLogger, FeatureForward.GmailApiImportAsync(), FeatureGetToken.GMailOAuthTokenJsonData, FeatureGetToken.ExchangeCodeForTokenAsync()
+実装において迷った点 (もしあれば): Gmail import の送信方式（base64 JSON vs multipart upload）→ サイズ増大回避のため multipart を採用
+参考文献 (複数あってよい): なし
+
+
+【詳細】
+- 仕様 [AC579L84] に従い、forward モード (forward --config <設定ファイル>) を実装した。
+- TOML 設定 [A44FBNFX] を Tomlyn で読み込み、必須フィールドの妥当性検査と相対パス解決（設定ファイル所在ディレクトリ基準）を実装した。
+- POP3 は外部ライブラリを使わず、TcpClient/SslStream により USER/PASS/STAT/RETR/DELE/QUIT と STLS(StartTLS)/Full SSL を実装した。
+- メール本文の解析は MimeKit を用い、MailMetaData [VZR2Y5BY] をベストエフォートで生成し、取得ログを Info で出力するようにした。
+- アーカイブは archive_dir/YYMMDD/YYMMDD_HHMMSS_SHA1_FROM64.txt に保存し、BOM + メタJSON + 区切り + 生メールバイナリの構成で出力するようにした。
+- Gmail への転送は users.messages.import を使用し、INBOX/UNREAD を付与して取り込むようにした。送信は multipart upload を採用し、生メールを base64 化せずに送る。
+- token_json [EG8R7RTE] は refresh_token が必要なため、gettoken 側で refresh_token を保存するよう拡張し、forward 側は更新間隔に応じて refresh を行い token_json を更新保存するようにした。
+- ログは [Y5CRNZA3] の 1 行形式で、Info は stdout + ファイル、Error は stderr + ファイルに出力する実装を追加した（保存失敗時は stderr に出して続行）。
+
+【ビルド】
+- Tomlyn/MimeKit 追加に伴い NU1605 (System.Text.Encoding.CodePages のダウングレード) が発生したため、csproj の CodePages を 8.0.0 に更新して解消した。
+- dotnet restore / dotnet build を実施し、コンパイル成功を確認した。
+
+
+
+

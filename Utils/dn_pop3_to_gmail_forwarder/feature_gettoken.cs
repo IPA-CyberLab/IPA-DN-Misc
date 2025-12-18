@@ -84,6 +84,11 @@ public static class FeatureGetToken
         /// アクセストークン (必要に応じて更新される) です。
         /// </summary>
         public string UserAccessToken = "";
+
+        /// <summary>
+        /// リフレッシュトークン (長期利用用) です。
+        /// </summary>
+        public string UserRefreshToken = "";
     }
 
     /// <summary>
@@ -288,16 +293,37 @@ public static class FeatureGetToken
             return;
         }
 
-        string accessToken = await ExchangeCodeForAccessTokenAsync(code, options, redirectUri, cancel).ConfigureAwait(false);
+        OAuthTokenResponse token = await ExchangeCodeForTokenAsync(code, options, redirectUri, cancel).ConfigureAwait(false);
 
         string saveAsFullPath = Path.GetFullPath(options.SaveAsPath);
+
+        // refresh_token が返ってこないケースに備え、既存ファイルがある場合はそこから補完する
+        string refreshToken = token.RefreshToken;
+        if (string.IsNullOrWhiteSpace(refreshToken) && File.Exists(saveAsFullPath))
+        {
+            try
+            {
+                var existing = await LibCommon.ReadSingleJsonFileAsync<GMailOAuthTokenJsonData>(saveAsFullPath, cancel).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(existing.UserRefreshToken) == false)
+                {
+                    refreshToken = existing.UserRefreshToken;
+                }
+            }
+            catch { }
+        }
+
+        if (string.IsNullOrWhiteSpace(refreshToken))
+        {
+            throw new Exception("APPERROR: OAuth token endpoint response does not contain refresh_token. Re-run gettoken with consent, or delete existing authorization and try again.");
+        }
 
         var data = new GMailOAuthTokenJsonData
         {
             LastRefreshDt = DateTimeOffset.Now,
             AppClientId = options.ClientId,
             AppClientSecret = options.ClientSecret,
-            UserAccessToken = accessToken,
+            UserAccessToken = token.AccessToken,
+            UserRefreshToken = refreshToken,
         };
 
         await WriteTokenFileAsync(saveAsFullPath, data, cancel).ConfigureAwait(false);
@@ -310,14 +336,14 @@ public static class FeatureGetToken
     }
 
     /// <summary>
-    /// OAuth の authorization code をアクセストークンに交換します。
+    /// OAuth の authorization code をアクセストークン等に交換します。
     /// </summary>
     /// <param name="authorizationCode">Authorization code です。</param>
     /// <param name="options">gettoken 実行パラメータです。</param>
     /// <param name="redirectUri">OAuth リダイレクト URI です。</param>
     /// <param name="cancel">キャンセル要求です。</param>
-    /// <returns>アクセストークン文字列です。</returns>
-    private static async Task<string> ExchangeCodeForAccessTokenAsync(string authorizationCode, GetTokenOptions options, string redirectUri, CancellationToken cancel)
+    /// <returns>トークン情報です。</returns>
+    private static async Task<OAuthTokenResponse> ExchangeCodeForTokenAsync(string authorizationCode, GetTokenOptions options, string redirectUri, CancellationToken cancel)
     {
         // Google OAuth 2.0 Token Endpoint
         const string tokenEndpoint = "https://oauth2.googleapis.com/token";
@@ -360,7 +386,29 @@ public static class FeatureGetToken
             throw new Exception($"APPERROR: Token endpoint response does not contain access_token. Body: {body}");
         }
 
-        return accessToken;
+        string? refreshToken = json.Value<string>("refresh_token");
+
+        return new OAuthTokenResponse
+        {
+            AccessToken = accessToken,
+            RefreshToken = refreshToken ?? "",
+        };
+    }
+
+    /// <summary>
+    /// OAuth トークンエンドポイントのレスポンス (必要な最小限) です。
+    /// </summary>
+    private sealed class OAuthTokenResponse
+    {
+        /// <summary>
+        /// アクセストークンです。
+        /// </summary>
+        public string AccessToken = "";
+
+        /// <summary>
+        /// リフレッシュトークンです。(返却されない場合がある)
+        /// </summary>
+        public string RefreshToken = "";
     }
 
     /// <summary>

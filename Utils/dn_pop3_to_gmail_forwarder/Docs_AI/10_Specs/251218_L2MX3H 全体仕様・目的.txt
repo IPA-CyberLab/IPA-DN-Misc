@@ -149,7 +149,7 @@ gmail_max_mail_size = 40000000
    
   Info ログとして、アーカイブ保存した txt ファイルの出力先ファイル名とファイルサイズをわかりやすく出力する。
 
- (c) Gmail への転送処理は、次のように行なわれる。ただし、メールサイズが "gmail_max_mail_size" を超えている場合は、その旨を詳しく「標準エラー出力」(標準出力ではない) にメッセージとして記載して、Gmail への転送をスキップする。
+ (c) Gmail への転送処理は、次のように行なわれる。ただし、メールサイズが "gmail_max_mail_size" を超えている場合は、その旨を詳しく Error ログに記載して (書き込み対象メールの MailSize、DateTime_Received、AddressList_From、AddressList_To、Subject、MessageId を、わかりやすく、併記する) 、Gmail への転送をスキップする。
  
    [A] Gmail に HTTPS API で接続する際の、HTTPS プロトコルに係る TCP, SSL, タイムアウト等の制御パラメータは、[A44FBNFX] の各値を用いること。意味は、コメント欄を参照すること。
     Gmail との通信は、.NET の BCL の TCP ライブラリおよび SSL ライブラリを用いて対話すること。Gmail API プロトコルについて、外部の NuGet ライブラリを利用してはならない。
