@@ -250,3 +250,25 @@ AI 実行コンピュータ名: pc37
 
 
 
+===================================================================
+日時: 2025/12/18 21:18:46 (JST)
+開発者によって指示された指示の内容: ssl_trusted_static_hash_list 対応 (251218_X738HN)
+作業内容の概要: POP3 SSL 証明書検証に静的ハッシュ許可リストを追加
+AI エンジン: GPT-5.2 (Codex CLI)
+AI 実行コンピュータ名: pc37
+関連タグ: 251218_X738HN, A44FBNFX
+編集したファイルの一覧: feature_forward.cs
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): FeatureForward.ParseSslTrustedStaticHashList(), FeatureForward.GetOptionalString(), FeatureForward.Pop3Config.SslTrustedStaticHashList, FeatureForward.Pop3Client.WrapSslAsync(), FeatureForward.Pop3Client.IsServerCertificateTrustedByStaticHash()
+実装において迷った点 (もしあれば): SHA192 の解釈（48桁）→ SHA256/SHA384/SHA512 の先頭192bitを候補照合
+参考文献 (複数あってよい): なし
+
+
+【詳細】
+- 仕様 [A44FBNFX] に新設された pop3.ssl_trusted_static_hash_list を読み取り、POP3 の SSL サーバー証明書検証に反映した。
+- ssl_verify_server_cert=true の場合、通常の検証 (SslPolicyErrors.None) に加えて、証明書の SHA1/SHA256/SHA384/SHA512 指紋が許可リストに一致すれば信頼するようにした（CN 不一致や期限切れ等でも許容）。
+- 許可リストは ';' または ',' 区切りで複数指定可能とし、空白・':'・'-' を除去して小文字化した上で、16進数かつ長さが 40/48/64/96/128 のみ許容するバリデーションを追加した。
+- ビルド確認として dotnet build を実行し、コンパイル成功を確認した。
+
+
+
+

@@ -22,6 +22,7 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -1030,6 +1031,7 @@ public static class FeatureForward
             Port = GetRequiredInt(model, "pop3", "port", 1, 65535),
             SslMode = ParseRequiredSslMode(GetRequiredString(model, "pop3", "ssl_mode")),
             SslVerifyServerCert = GetRequiredBool(model, "pop3", "ssl_verify_server_cert"),
+            SslTrustedStaticHashList = ParseSslTrustedStaticHashList(GetOptionalString(model, "pop3", "ssl_trusted_static_hash_list")),
             Username = GetRequiredString(model, "pop3", "username"),
             Password = GetRequiredString(model, "pop3", "password"),
             TcpRetryAttempts = GetRequiredInt(model, "pop3", "tcp_retry_attempts", 1, 100),
@@ -1071,6 +1073,87 @@ public static class FeatureForward
             "full" => Pop3SslMode.Full,
             _ => throw new Exception("APPERROR: pop3.ssl_mode must be one of: none, starttls, full."),
         };
+    }
+
+    /// <summary>
+    /// ssl_trusted_static_hash_list をパースします。[A44FBNFX]
+    /// </summary>
+    /// <param name="src">設定値文字列です。</param>
+    /// <returns>正規化済みハッシュ文字列のセットです。</returns>
+    private static HashSet<string> ParseSslTrustedStaticHashList(string src)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+
+        if (string.IsNullOrWhiteSpace(src))
+        {
+            return set;
+        }
+
+        string[] tokens = src.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (string token in tokens)
+        {
+            string s = NormalizeHexString(token);
+            if (string.IsNullOrEmpty(s))
+            {
+                continue;
+            }
+
+            // SHA1: 40, SHA192: 48, SHA256: 64, SHA384: 96, SHA512: 128 (いずれか) [A44FBNFX]
+            if (s.Length != 40 && s.Length != 48 && s.Length != 64 && s.Length != 96 && s.Length != 128)
+            {
+                throw new Exception($"APPERROR: pop3.ssl_trusted_static_hash_list contains invalid hash length: {s.Length}");
+            }
+
+            if (IsAllHexString(s) == false)
+            {
+                throw new Exception("APPERROR: pop3.ssl_trusted_static_hash_list contains non-hex character.");
+            }
+
+            set.Add(s);
+        }
+
+        return set;
+    }
+
+    /// <summary>
+    /// 16 進数文字列を正規化します。(空白、':'、'-' を除去し、小文字化) [A44FBNFX]
+    /// </summary>
+    /// <param name="src">入力文字列です。</param>
+    /// <returns>正規化後の文字列です。</returns>
+    private static string NormalizeHexString(string src)
+    {
+        if (src == null) throw new ArgumentNullException(nameof(src));
+
+        var sb = new StringBuilder(src.Length);
+        foreach (char c in src)
+        {
+            if (char.IsWhiteSpace(c) || c == ':' || c == '-')
+            {
+                continue;
+            }
+
+            sb.Append(char.ToLowerInvariant(c));
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 文字列が 0-9a-f のみで構成されているか確認します。
+    /// </summary>
+    /// <param name="s">入力文字列です。</param>
+    /// <returns>すべて 16 進数文字なら true です。</returns>
+    private static bool IsAllHexString(string s)
+    {
+        if (s == null) throw new ArgumentNullException(nameof(s));
+
+        foreach (char c in s)
+        {
+            bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+            if (ok == false) return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -1123,6 +1206,37 @@ public static class FeatureForward
             {
                 throw new Exception($"APPERROR: TOML value is empty: {tableName}.{key}");
             }
+            return s;
+        }
+
+        throw new Exception($"APPERROR: TOML value type must be string: {tableName}.{key}");
+    }
+
+    /// <summary>
+    /// TOML の任意文字列フィールドを取得します。(無い場合は "" を返します)
+    /// </summary>
+    /// <param name="root">ルートテーブルです。</param>
+    /// <param name="tableName">テーブル名です。</param>
+    /// <param name="key">キー名です。</param>
+    /// <returns>文字列値です。</returns>
+    private static string GetOptionalString(TomlTable root, string tableName, string key)
+    {
+        if (root == null) throw new ArgumentNullException(nameof(root));
+        if (tableName == null) throw new ArgumentNullException(nameof(tableName));
+        if (key == null) throw new ArgumentNullException(nameof(key));
+
+        if (root.TryGetValue(tableName, out object? tableObj) == false || tableObj is TomlTable table == false)
+        {
+            return "";
+        }
+
+        if (table.TryGetValue(key, out object? valueObj) == false || valueObj == null)
+        {
+            return "";
+        }
+
+        if (valueObj is string s)
+        {
             return s;
         }
 
@@ -1278,6 +1392,11 @@ public static class FeatureForward
         /// サーバー証明書の検証を行うかどうかです。
         /// </summary>
         public bool SslVerifyServerCert;
+
+        /// <summary>
+        /// サーバー証明書を静的ハッシュ値で信頼するためのリストです。[A44FBNFX]
+        /// </summary>
+        public HashSet<string> SslTrustedStaticHashList = new HashSet<string>(StringComparer.Ordinal);
 
         /// <summary>
         /// POP3 認証ユーザー名です。
@@ -1684,7 +1803,7 @@ public static class FeatureForward
 
                     if (_config.SslMode == Pop3SslMode.Full)
                     {
-                        baseStream = await WrapSslAsync(baseStream, _config.Hostname, _config.SslVerifyServerCert, cancel).ConfigureAwait(false);
+                        baseStream = await WrapSslAsync(baseStream, _config.Hostname, _config.SslVerifyServerCert, _config.SslTrustedStaticHashList, cancel).ConfigureAwait(false);
                     }
 
                     SetStream(baseStream);
@@ -1698,7 +1817,7 @@ public static class FeatureForward
                         string stlsResp = await SendCommandGetSingleLineResponseAsync("STLS", cancel).ConfigureAwait(false);
                         EnsureOk(stlsResp);
 
-                        Stream sslStream = await WrapSslAsync(_stream!, _config.Hostname, _config.SslVerifyServerCert, cancel).ConfigureAwait(false);
+                        Stream sslStream = await WrapSslAsync(_stream!, _config.Hostname, _config.SslVerifyServerCert, _config.SslTrustedStaticHashList, cancel).ConfigureAwait(false);
                         SetStream(sslStream);
                     }
 
@@ -1774,7 +1893,7 @@ public static class FeatureForward
             throw new Exception($"APPERROR: POP3 error response: {line}");
         }
 
-        private static async Task<Stream> WrapSslAsync(Stream baseStream, string hostname, bool verifyServerCert, CancellationToken cancel)
+        private static async Task<Stream> WrapSslAsync(Stream baseStream, string hostname, bool verifyServerCert, IReadOnlySet<string> trustedStaticHashList, CancellationToken cancel)
         {
             if (baseStream == null) throw new ArgumentNullException(nameof(baseStream));
             if (hostname == null) throw new ArgumentNullException(nameof(hostname));
@@ -1786,7 +1905,21 @@ public static class FeatureForward
             }
             else
             {
-                callback = (sender, cert, chain, errors) => errors == SslPolicyErrors.None;
+                callback = (sender, cert, chain, errors) =>
+                {
+                    if (errors == SslPolicyErrors.None)
+                    {
+                        return true;
+                    }
+
+                    // ★ 静的ハッシュ許可リストに一致する場合は、証明書を信頼してよい [A44FBNFX]
+                    if (trustedStaticHashList != null && trustedStaticHashList.Count >= 1)
+                    {
+                        return IsServerCertificateTrustedByStaticHash(cert, trustedStaticHashList);
+                    }
+
+                    return false;
+                };
             }
 
             var ssl = new SslStream(baseStream, leaveInnerStreamOpen: false, userCertificateValidationCallback: callback);
@@ -1799,6 +1932,60 @@ public static class FeatureForward
 
             await ssl.AuthenticateAsClientAsync(opts, cancel).ConfigureAwait(false);
             return ssl;
+        }
+
+        /// <summary>
+        /// サーバー証明書のハッシュ値が、静的許可リストに一致するかどうかを確認します。[A44FBNFX]
+        /// </summary>
+        /// <param name="certificate">サーバー証明書です。</param>
+        /// <param name="trustedStaticHashList">許可する証明書ハッシュ値のセットです。</param>
+        /// <returns>一致すれば true です。</returns>
+        private static bool IsServerCertificateTrustedByStaticHash(X509Certificate? certificate, IReadOnlySet<string> trustedStaticHashList)
+        {
+            if (trustedStaticHashList == null) throw new ArgumentNullException(nameof(trustedStaticHashList));
+            if (certificate == null) return false;
+
+            try
+            {
+                byte[] raw = certificate.GetRawCertData();
+
+                byte[] sha1Bytes = SHA1.HashData(raw);
+                byte[] sha256Bytes = SHA256.HashData(raw);
+                byte[] sha384Bytes = SHA384.HashData(raw);
+                byte[] sha512Bytes = SHA512.HashData(raw);
+
+                string sha1Hex = Convert.ToHexString(sha1Bytes).ToLowerInvariant();
+                string sha256Hex = Convert.ToHexString(sha256Bytes).ToLowerInvariant();
+                string sha384Hex = Convert.ToHexString(sha384Bytes).ToLowerInvariant();
+                string sha512Hex = Convert.ToHexString(sha512Bytes).ToLowerInvariant();
+
+                // SHA1 / SHA256 / SHA384 / SHA512
+                if (trustedStaticHashList.Contains(sha1Hex) ||
+                    trustedStaticHashList.Contains(sha256Hex) ||
+                    trustedStaticHashList.Contains(sha384Hex) ||
+                    trustedStaticHashList.Contains(sha512Hex))
+                {
+                    return true;
+                }
+
+                // SHA192 は仕様上明示されているため、SHA256/SHA384/SHA512 の先頭 192bit (24bytes) を候補として照合する [A44FBNFX]
+                string sha256_192 = sha256Hex.Substring(0, 48);
+                string sha384_192 = sha384Hex.Substring(0, 48);
+                string sha512_192 = sha512Hex.Substring(0, 48);
+
+                if (trustedStaticHashList.Contains(sha256_192) ||
+                    trustedStaticHashList.Contains(sha384_192) ||
+                    trustedStaticHashList.Contains(sha512_192))
+                {
+                    return true;
+                }
+
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }
