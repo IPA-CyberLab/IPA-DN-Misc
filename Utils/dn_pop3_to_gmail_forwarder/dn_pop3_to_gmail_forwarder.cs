@@ -51,16 +51,88 @@ using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Serialization;
+using System.CommandLine;
+using System.CommandLine.Invocation;
 
 namespace dn_pop3_to_gmail_forwarder;
 
 public class Program
 {
-    public static async Task Main(string[] args)
+    /// <summary>
+    /// エントリポイント (Main 関数) です。
+    /// </summary>
+    /// <param name="args">コマンドライン引数です。</param>
+    /// <returns>プロセス戻り値です。(0: 成功 / 1: 失敗)</returns>
+    public static async Task<int> Main(string[] args)
     {
-        await Task.CompletedTask; // await が 1 個もない警告を仮に非表示に
+        try
+        {
+            RootCommand rootCommand = BuildRootCommand();
 
-        Console.WriteLine("Hello World");
+            if (args.Length == 0)
+            {
+                await rootCommand.InvokeAsync(new[] { "--help" }).ConfigureAwait(false);
+                return 1;
+            }
+
+            return await rootCommand.InvokeAsync(args).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(ex.ToString());
+            return 1;
+        }
+    }
+
+    /// <summary>
+    /// コマンドライン定義を構築します。(251218_K3VRU3 パターン)
+    /// </summary>
+    /// <returns>ルートコマンドです。</returns>
+    private static RootCommand BuildRootCommand()
+    {
+        var root = new RootCommand("dn_pop3_to_gmail_forwarder: import POP3 mailbox messages into Gmail (via Gmail API).");
+
+        var getTokenCommand = new Command("gettoken", "Get Gmail OAuth token JSON (desktop/native app loopback flow).");
+
+        var saveAsOption = new Option<string>("--saveas", "Output token JSON file path.") { IsRequired = true };
+        var clientIdOption = new Option<string>("--client_id", "Gmail API client_id.") { IsRequired = true };
+        var clientSecretOption = new Option<string>("--client_secret", "Gmail API client_secret.") { IsRequired = true };
+        var portOption = new Option<int>("--port", "Local loopback HTTP port (127.0.0.1).") { IsRequired = true };
+
+        getTokenCommand.AddOption(saveAsOption);
+        getTokenCommand.AddOption(clientIdOption);
+        getTokenCommand.AddOption(clientSecretOption);
+        getTokenCommand.AddOption(portOption);
+
+        getTokenCommand.SetHandler(async (InvocationContext context) =>
+        {
+            string saveAs = context.ParseResult.GetValueForOption(saveAsOption) ?? "";
+            string clientId = context.ParseResult.GetValueForOption(clientIdOption) ?? "";
+            string clientSecret = context.ParseResult.GetValueForOption(clientSecretOption) ?? "";
+            int port = context.ParseResult.GetValueForOption(portOption);
+
+            var options = new FeatureGetToken.GetTokenOptions
+            {
+                SaveAsPath = saveAs,
+                ClientId = clientId,
+                ClientSecret = clientSecret,
+                Port = port,
+            };
+
+            context.ExitCode = await FeatureGetToken.RunAsync(options).ConfigureAwait(false);
+        });
+
+        var forwardCommand = new Command("forward", "Forward mode (not implemented yet).");
+        forwardCommand.SetHandler((InvocationContext context) =>
+        {
+            Console.Error.WriteLine("APPERROR: forward mode is not implemented yet.");
+            context.ExitCode = 1;
+        });
+
+        root.AddCommand(getTokenCommand);
+        root.AddCommand(forwardCommand);
+
+        return root;
     }
 }
 
