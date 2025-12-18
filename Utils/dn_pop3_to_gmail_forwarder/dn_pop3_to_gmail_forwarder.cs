@@ -67,6 +67,9 @@ public class Program
     {
         try
         {
+            // ★ 旧来エンコーディング (ISO-2022-JP / Shift JIS 等) 対応のため、プログラム初期化時に登録する (規約 111. テキスト処理 [WUZK8R3U])
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
             RootCommand rootCommand = BuildRootCommand();
 
             if (args.Length == 0)

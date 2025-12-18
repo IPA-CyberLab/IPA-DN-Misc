@@ -1,0 +1,130 @@
+﻿===================================================================
+日時: 2025/12/18 14:37:45 (JST)
+作業内容の概要: gettoken モード [F3QBRBA9] を実装しビルド確認
+AI エンジン: GPT-5.2 (Codex CLI) / 推論レベル: 既定
+AI 実行コンピュータ名: pc37
+関連タグ: 251218_M7W6MP, F3QBRBA9, EG8R7RTE, FSGX2FQ2,
+          251218_K3VRU3, 251216_VP33AH
+編集したファイルの一覧:
+- dn_pop3_to_gmail_forwarder.cs
+- feature_gettoken.cs
+- dn_pop3_to_gmail_forwarder.csproj
+参考文献 (複数あってよい):
+- https://developers.google.com/identity/protocols/oauth2/native-app (Google) loopback OAuth の概念
+- https://developers.google.com/gmail/api/auth/scopes (Google) gmail.modify scope の確認
+
+
+1. 事前確認
+- Docs_AI 配下の指示 (Readme_for_AI.txt) と、仕様
+  (全体仕様・目的.txt) を読み、まず gettoken
+  モード [F3QBRBA9] を実装する方針とした。
+- エントリポイントは 251218_K3VRU3 の指示に従い、
+  System.CommandLine で引数パースすることにした。
+
+2. 実装内容
+- gettoken モードの本体を feature_gettoken.cs に実装。
+  Kestrel 等の外部 Web フレームワークは使わず、
+  TcpListener + 最小限の HTTP/1.1 パーサで
+  127.0.0.1 のみ待受する軽量 HTTP サーバを実装。
+- /start で案内 HTML を返し、Start ボタンから Google
+  OAuth 認証 URL に遷移するようにした。
+- /auth_callback で state を検証し、code を token
+  エンドポイントに POST して access_token を取得。
+- 取得したトークンは仕様 [EG8R7RTE] の
+  GMailOAuthTokenJsonData 形式で JSON 保存。
+- dn_pop3_to_gmail_forwarder.cs に System.CommandLine
+  の RootCommand / gettoken サブコマンドを定義。
+  forward は未実装としてエラー終了する stub とした。
+- System.CommandLine パッケージ参照を csproj に追加。
+
+3. 動作確認
+- BuildTest.txt の指示に従い dotnet build を実行し、
+  コンパイル成功を確認した。
+
+4. トラブルと対処
+- この環境では landlock sandbox 制約エラーが発生したため、
+  以降の調査・ビルドは escalated 実行で実施した。
+
+
+===================================================================
+日時: 2025/12/18 14:37:45 (JST)
+作業内容の概要: 規約 111. テキスト処理 [WUZK8R3U] を適用
+AI エンジン: GPT-5.2 (Codex CLI) / 推論レベル: 既定
+AI 実行コンピュータ名: pc37
+関連タグ: 251218_PYG4DH, WUZK8R3U, 251216_VP33AH
+編集したファイルの一覧:
+- dn_pop3_to_gmail_forwarder.cs
+参考文献 (複数あってよい):
+- なし
+
+
+1. 目的
+- ISO-2022-JP / Shift JIS 等の旧来エンコーディングを
+  利用可能にするため、起動時に
+  Encoding.RegisterProvider(CodePagesEncodingProvider.Instance)
+  を必ず呼ぶ (規約 111)。
+
+2. 実装内容
+- Program.Main の冒頭で Encoding.RegisterProvider を
+  呼び出すように追加した。
+
+3. 動作確認
+- dotnet build を実行し、コンパイル成功を確認した。
+
+
+===================================================================
+日時: 2025/12/18 14:37:45 (JST)
+作業内容の概要: 手動リバート後に 251218_PYG4DH を再適用しビルド
+AI エンジン: GPT-5.2 (Codex CLI) / 推論レベル: 既定
+AI 実行コンピュータ名: pc37
+関連タグ: 251218_PYG4DH, WUZK8R3U
+編集したファイルの一覧:
+- dn_pop3_to_gmail_forwarder.cs
+参考文献 (複数あってよい):
+- なし
+
+
+1. 背景
+- 開発者が手動でコードを戻したとの申告があったため、
+  規約 111 の適用状態を確認し、再度適用した。
+
+2. 実装内容
+- Program.Main 冒頭の Encoding.RegisterProvider 呼び出しを
+  再度追加した。
+
+3. 動作確認
+- dotnet build を実行し、コンパイル成功を確認した。
+
+
+===================================================================
+日時: 2025/12/18 14:37:45 (JST)
+作業内容の概要: 規約 101. JSON [PV4U3JTR] の (4)(5) 適用を実装
+AI エンジン: GPT-5.2 (Codex CLI) / 推論レベル: 既定
+AI 実行コンピュータ名: pc37
+関連タグ: PV4U3JTR, 251216_VP33AH
+編集したファイルの一覧:
+- lib_json_config.cs
+- feature_gettoken.cs
+参考文献 (複数あってよい):
+- なし
+
+
+1. 目的
+- JSON 設定ファイルの書式規約として、書き出し時に
+  UTF-8 BOM、LF 改行、JSON 前 2 行改行・後 3 行改行を
+  付与する (4)。
+- 読み出し時は BOM 有無と改行コード混在に対応する (5)。
+
+2. 実装内容
+- JSON 設定ファイルの読み書きを共通化するため、
+  lib_json_config.cs に読み書きヘルパを追加し、
+  gettoken の保存処理をそこに寄せる形に変更した。
+
+3. 動作確認
+- dotnet build を実行し、コンパイル成功を確認した。
+
+4. 補足
+- その後の手動編集により、本変更がワークツリーに
+  残っていない場合がある。
+
+
