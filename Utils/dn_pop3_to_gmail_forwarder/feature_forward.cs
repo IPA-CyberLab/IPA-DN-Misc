@@ -31,6 +31,7 @@ using System.Threading.Tasks;
 using MimeKit;
 using MimeKit.Utils;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Tomlyn;
 using Tomlyn.Model;
 
@@ -1484,15 +1485,21 @@ public static class FeatureForward
     }
 
     /// <summary>
-    /// Gmail API import 用のメタデータ JSON を生成します。[251222_ZXH7N7]
+    /// Gmail API import 用のメタデータ JSON を生成します。[251222_ZXH7N7][251223_BVHM5V]
     /// </summary>
+    /// <param name="httpClient">HTTP クライアントです。</param>
+    /// <param name="accessToken">アクセストークンです。</param>
     /// <param name="filterResult">フィルタ結果です。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
     /// <returns>JSON 文字列です。(改行は LF のみ)</returns>
-    private static string BuildGmailImportMetaJson(MailForwardFilterResult filterResult)
+    private static async Task<string> BuildGmailImportMetaJsonAsync(HttpClient httpClient, string accessToken, MailForwardFilterResult filterResult, CancellationToken cancel)
     {
+        if (httpClient == null) throw new ArgumentNullException(nameof(httpClient));
+        if (accessToken == null) throw new ArgumentNullException(nameof(accessToken));
         if (filterResult == null) throw new ArgumentNullException(nameof(filterResult));
 
-        List<string> labelIds = BuildGmailLabelIdList(filterResult);
+        List<string> labelNames = BuildGmailLabelNameList(filterResult);
+        List<string> labelIds = await ResolveGmailLabelIdsAsync(httpClient, accessToken, labelNames, cancel).ConfigureAwait(false);
 
         string metaJson = JsonConvert.SerializeObject(new { labelIds = labelIds }, LibCommon.CreateStandardJsonSerializerSettings());
         metaJson = metaJson.Replace("\r\n", "\n").Replace("\r", "\n");
@@ -1501,16 +1508,16 @@ public static class FeatureForward
     }
 
     /// <summary>
-    /// Gmail API import の labelIds を生成します。[251222_ZXH7N7]
+    /// Gmail API import のラベル名一覧を生成します。[251222_ZXH7N7]
     /// </summary>
     /// <param name="filterResult">フィルタ結果です。</param>
-    /// <returns>labelIds の一覧です。</returns>
-    private static List<string> BuildGmailLabelIdList(MailForwardFilterResult filterResult)
+    /// <returns>ラベル名一覧です。</returns>
+    private static List<string> BuildGmailLabelNameList(MailForwardFilterResult filterResult)
     {
         if (filterResult == null) throw new ArgumentNullException(nameof(filterResult));
 
         var list = new List<string>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         AddGmailLabelIfMissing(seen, list, "INBOX");
 
@@ -1525,7 +1532,7 @@ public static class FeatureForward
                 .Where(x => string.IsNullOrWhiteSpace(x) == false)
                 .Select(x => (x ?? "").Trim())
                 .Where(x => x.Length >= 1)
-                .Distinct(StringComparer.Ordinal)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(x => x, StringComparer.Ordinal)
                 .ToList();
 
@@ -1560,6 +1567,192 @@ public static class FeatureForward
     }
 
     /// <summary>
+    /// ラベル名一覧を labelIds に変換します。[251223_BVHM5V]
+    /// </summary>
+    /// <param name="httpClient">HTTP クライアントです。</param>
+    /// <param name="accessToken">アクセストークンです。</param>
+    /// <param name="labelNames">ラベル名一覧です。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    /// <returns>labelIds 一覧です。</returns>
+    private static async Task<List<string>> ResolveGmailLabelIdsAsync(HttpClient httpClient, string accessToken, List<string> labelNames, CancellationToken cancel)
+    {
+        if (httpClient == null) throw new ArgumentNullException(nameof(httpClient));
+        if (accessToken == null) throw new ArgumentNullException(nameof(accessToken));
+
+        if (labelNames == null || labelNames.Count == 0)
+        {
+            return new List<string>();
+        }
+
+        Dictionary<string, string> nameToIdMap;
+        HashSet<string> idSet;
+
+        (nameToIdMap, idSet) = await GetGmailLabelNameToIdMapAsync(httpClient, accessToken, cancel).ConfigureAwait(false);
+
+        var labelIds = new List<string>();
+
+        foreach (string rawName in labelNames)
+        {
+            cancel.ThrowIfCancellationRequested();
+
+            string name = (rawName ?? "").Trim();
+            if (name.Length == 0) continue;
+
+            if (nameToIdMap.TryGetValue(name, out string? id))
+            {
+                labelIds.Add(id);
+                continue;
+            }
+
+            // 既に labelIds が指定されているケースを許容する (ID の一致があればそのまま利用) [251223_BVHM5V]
+            if (idSet.Contains(name))
+            {
+                labelIds.Add(name);
+                continue;
+            }
+
+            try
+            {
+                string createdId = await CreateGmailLabelAsync(httpClient, accessToken, name, cancel).ConfigureAwait(false);
+                nameToIdMap[name] = createdId;
+                idSet.Add(createdId);
+                labelIds.Add(createdId);
+            }
+            catch (Exception ex)
+            {
+                // 作成に失敗した場合は再取得して存在確認を行う
+                (nameToIdMap, idSet) = await GetGmailLabelNameToIdMapAsync(httpClient, accessToken, cancel).ConfigureAwait(false);
+                if (nameToIdMap.TryGetValue(name, out string? id2))
+                {
+                    labelIds.Add(id2);
+                    continue;
+                }
+
+                throw new Exception(LibCommon.AppendExceptionDetail($"APPERROR: Failed to create Gmail label: {name}", ex), ex);
+            }
+        }
+
+        return labelIds;
+    }
+
+    /// <summary>
+    /// Gmail のラベル一覧を取得し、名前→ID の対応表を作成します。[251223_BVHM5V]
+    /// </summary>
+    /// <param name="httpClient">HTTP クライアントです。</param>
+    /// <param name="accessToken">アクセストークンです。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    /// <returns>名前→ID の対応表と ID セットです。</returns>
+    private static async Task<(Dictionary<string, string> NameToIdMap, HashSet<string> IdSet)> GetGmailLabelNameToIdMapAsync(HttpClient httpClient, string accessToken, CancellationToken cancel)
+    {
+        if (httpClient == null) throw new ArgumentNullException(nameof(httpClient));
+        if (accessToken == null) throw new ArgumentNullException(nameof(accessToken));
+
+        const string Url = "https://gmail.googleapis.com/gmail/v1/users/me/labels";
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, Url);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+        using HttpResponseMessage resp = await httpClient.SendAsync(req, cancel).ConfigureAwait(false);
+        string body = await resp.Content.ReadAsStringAsync(cancel).ConfigureAwait(false);
+
+        if (resp.IsSuccessStatusCode == false)
+        {
+            throw new Exception($"APPERROR: Gmail API users.labels.list returned {(int)resp.StatusCode} {resp.ReasonPhrase}. Body: {body}");
+        }
+
+        var nameToId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var idSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            JObject root = JObject.Parse(body);
+            if (root["labels"] is JArray labels)
+            {
+                foreach (var item in labels)
+                {
+                    string? id = item.Value<string>("id");
+                    string? name = item.Value<string>("name");
+
+                    if (string.IsNullOrWhiteSpace(id) == false)
+                    {
+                        id = id.Trim();
+                        idSet.Add(id);
+                    }
+
+                    if (string.IsNullOrWhiteSpace(id) == false && string.IsNullOrWhiteSpace(name) == false)
+                    {
+                        nameToId[name!.Trim()] = id!;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            throw new Exception(LibCommon.AppendExceptionDetail("APPERROR: Failed to parse Gmail labels.list response.", ex), ex);
+        }
+
+        return (nameToId, idSet);
+    }
+
+    /// <summary>
+    /// Gmail に新しいラベルを作成します。[251223_BVHM5V]
+    /// </summary>
+    /// <param name="httpClient">HTTP クライアントです。</param>
+    /// <param name="accessToken">アクセストークンです。</param>
+    /// <param name="labelName">作成するラベル名です。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    /// <returns>作成されたラベル ID です。</returns>
+    private static async Task<string> CreateGmailLabelAsync(HttpClient httpClient, string accessToken, string labelName, CancellationToken cancel)
+    {
+        if (httpClient == null) throw new ArgumentNullException(nameof(httpClient));
+        if (accessToken == null) throw new ArgumentNullException(nameof(accessToken));
+
+        if (string.IsNullOrWhiteSpace(labelName))
+        {
+            throw new Exception("APPERROR: Gmail label name is empty.");
+        }
+
+        const string Url = "https://gmail.googleapis.com/gmail/v1/users/me/labels";
+
+        string name = labelName.Trim();
+
+        string json = JsonConvert.SerializeObject(new
+        {
+            name = name,
+            labelListVisibility = "labelShow",
+            messageListVisibility = "show",
+        }, LibCommon.CreateStandardJsonSerializerSettings());
+        json = json.Replace("\r\n", "\n").Replace("\r", "\n");
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, Url);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        req.Content = new StringContent(json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), "application/json");
+
+        using HttpResponseMessage resp = await httpClient.SendAsync(req, cancel).ConfigureAwait(false);
+        string body = await resp.Content.ReadAsStringAsync(cancel).ConfigureAwait(false);
+
+        if (resp.IsSuccessStatusCode == false)
+        {
+            throw new Exception($"APPERROR: Gmail API users.labels.create returned {(int)resp.StatusCode} {resp.ReasonPhrase}. Body: {body}");
+        }
+
+        try
+        {
+            JObject root = JObject.Parse(body);
+            string? id = root.Value<string>("id");
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                throw new Exception("APPERROR: Gmail API users.labels.create response does not contain id.");
+            }
+            return id.Trim();
+        }
+        catch (Exception ex)
+        {
+            throw new Exception(LibCommon.AppendExceptionDetail("APPERROR: Failed to parse Gmail labels.create response.", ex), ex);
+        }
+    }
+
+    /// <summary>
     /// Gmail API の users.messages.import を呼び出します。
     /// </summary>
     /// <param name="config">設定です。</param>
@@ -1579,7 +1772,7 @@ public static class FeatureForward
 
         using HttpClient httpClient = CreateHttpClientForGmail(config);
 
-        string importMetaJson = BuildGmailImportMetaJson(filterResult);
+        string importMetaJson = await BuildGmailImportMetaJsonAsync(httpClient, accessToken, filterResult, cancel).ConfigureAwait(false);
 
         // まずは元メールのインポートを試みる
         GmailApiImportCallResult first = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, rawMail, importMetaJson, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);

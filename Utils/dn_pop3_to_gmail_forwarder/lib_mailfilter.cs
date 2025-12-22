@@ -114,9 +114,12 @@ public static class LibMailFilterExec
     /// <returns>UserFilter を呼び出すデリゲート</returns>
     private static Func<MailForwardFilterParam, MailForwardFilterResult> CompileToFilterDelegate(string sourceCode)
     {
+        // ★ ユーザーコードは dn_pop3_to_gmail_forwarder を暗黙 using しているものとしてコンパイルする [251223_BBAX3A]
+        string sourceCodeWithImplicitUsings = BuildUserSourceWithImplicitUsings(sourceCode);
+
         // 解析（構文木）
         SyntaxTree syntaxTree = CSharpSyntaxTree.ParseText(
-            sourceCode,
+            sourceCodeWithImplicitUsings,
             new CSharpParseOptions(LanguageVersion.CSharp10) // .NET 6 相当（C# 10）
         );
 
@@ -184,6 +187,26 @@ public static class LibMailFilterExec
         return (Func<MailForwardFilterParam, MailForwardFilterResult>)userFilterMethod.CreateDelegate(
             typeof(Func<MailForwardFilterParam, MailForwardFilterResult>)
         );
+    }
+
+    /// <summary>
+    /// ユーザーコードに、暗黙 using を付与してコンパイル用ソースコードを生成します。
+    /// </summary>
+    /// <param name="sourceCode">ユーザー提供のC#ソースコードです。</param>
+    /// <returns>暗黙 using を付与したソースコードです。</returns>
+    private static string BuildUserSourceWithImplicitUsings(string sourceCode)
+    {
+        sourceCode ??= "";
+
+        const string ns = "dn_pop3_to_gmail_forwarder";
+
+        if (sourceCode.IndexOf("global using " + ns, StringComparison.Ordinal) >= 0 ||
+            sourceCode.IndexOf("using " + ns, StringComparison.Ordinal) >= 0)
+        {
+            return sourceCode;
+        }
+
+        return "using " + ns + ";\n" + sourceCode;
     }
 
     /// <summary>

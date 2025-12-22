@@ -43,3 +43,73 @@ Main() で起動時に "Hello World" と表示するコードを先頭に追加�
 
 251223_AQCX8B:
 「設定検査モード」 (check モード) [251222_ZYMQ4U] を追加せよ。
+
+251223_BBAX3A:
+現在、filter_csharp_filename で指定するユーザーフィルタ関数は、[251223_BBEK4Q] のように、MailForwardFilterResult および MailForwardFilterParam というクラスの参照につき、ネームスペース dn_pop3_to_gmail_forwarder を明示で指定する必要が生じている。これは煩雑である。そこで、LibMailFilterExec の実装を改良し、ユーザーコードのコンパイルに際しては、ネームスペース dn_pop3_to_gmail_forwarder を暗黙に using しているものとみなしてコンパイルするような改良を施せ。
+--- [251223_BBEK4Q] ここから ---
+public static class UserFilterClass
+{
+    public static dn_pop3_to_gmail_forwarder.MailForwardFilterResult UserFilter(dn_pop3_to_gmail_forwarder.MailForwardFilterParam mail)
+    {
+        dn_pop3_to_gmail_forwarder.MailForwardFilterResult result = new();
+
+        // ここで mail の内容を検査して何らかのフィルタ処理を実施
+
+        result.MarkAsRead = true;
+
+        result.LabelList.Add("Label1");
+        result.LabelList.Add("Label2");
+
+        return result;
+    }
+}
+--- ここまで ---
+
+
+251223_BVHM5V:
+
+以下の不具合を解決せよ。
+
+(1) 以下の [251223_BVUDR6] という user filter を定義して試したところ、Gmail へのインポート時に [251223_BVA9DF] という API エラーが出てしまう。Gmail には「Label1」というラベルは確かに存在する。
+
+原因は、Gmail API の labelIds が「ラベル名」ではなく「ラベルID」を要求する点です。
+現在の実装は MailForwardFilterResult.LabelList の文字列をそのまま labelIds に入れているため、Label1（名前）が渡り Invalid label になります。システムラベルは INBOX/UNREAD がIDとして通るため問題が見えにくいですが、ユーザーラベルは通常 Label_XXXX のようなIDなので弾かれます。補足: システムメッセージのインポートでも同じ labelIds を使っているため、そこでエラーになっています。
+
+(2) 対処策
+- Gmail API を呼び出す際に、users.labels.list を呼び、ラベル名→ ID へ変換してから labelIds に設定すること。
+- この際、指定されたラベルが、仮にまだ存在していない場合は、作成操作をすること。
+
+
+--- [251223_BVUDR6] ここから ---
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+
+public static class UserFilterClass
+{
+    public static MailForwardFilterResult UserFilter(MailForwardFilterParam mail)
+    {
+        MailForwardFilterResult result = new();
+
+        // ここで mail の内容を検査して何らかのフィルタ処理を実施
+
+        result.MarkAsRead = true;
+
+        result.LabelList.Add("Label1");
+
+        return result;
+    }
+}
+
+--- [251223_BVUDR6] ここまで ---
+
+--- [251223_BVA9DF] ここから ---
+2025/12/23 01:42:10.402 +09:00 [Error] APPERROR: Failed to import system message to Gmail. / Detail: System.Exception: APPERROR: Gmail API users.messages.import (system message) returned 400 Bad Request. Body: { /   "error": { /     "code": 400, /     "message": "Invalid label: Label1", /     "errors": [ /       { /         "message": "Invalid label: Label1", /         "domain": "global", /         "reason": "invalidArgument" /       } /     ], /     "status": "INVALID_ARGUMENT" /   } / } /  /    at dn_pop3_to_gmail_forwarder.FeatureForward.GmailApiImportAsync(ForwardConfig config, String accessToken, Byte[] rawMail, MailMetaData meta, MailForwardFilterResult filterResult, CancellationToken cancel) in C:\git\IPA-DN-Misc\Utils\dn_pop3_to_gmail_forwarder\feature_forward.cs:line 1644
+
+--- [251223_BVA9DF] ここまで ---
+
+
+

@@ -12,6 +12,45 @@ AI 実行コンピュータ名: pc34
 
 
 ===================================================================
+日時: 2025/12/23 01:56:18 JST
+開発者によって指示された指示の内容: 251223_BVHM5V ラベル名→ID変換と不足ラベル作成の実装
+作業内容の概要: Gmail labels.list/create を追加し labelIds をIDに変換
+AI エンジン: GPT-5 (Codex CLI) 推論レベル: 標準
+AI 実行コンピュータ名: pc34
+関連タグ: 251223_BVHM5V, 251223_BVUDR6, 251223_BVA9DF
+編集したファイルの一覧: feature_forward.cs
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): FeatureForward.BuildGmailImportMetaJsonAsync, FeatureForward.BuildGmailLabelNameList, FeatureForward.ResolveGmailLabelIdsAsync, FeatureForward.GetGmailLabelNameToIdMapAsync, FeatureForward.CreateGmailLabelAsync, FeatureForward.GmailApiImportAsync
+実装において迷った点 (もしあれば): フィルタ側がラベルIDを直接返す場合の扱いを考慮し、既存ID一致を許容する処理を追加した。
+参考文献 (複数あってよい): なし
+
+
+labelIds がラベル名ではなくIDを要求する点を踏まえ、Gmail API の users.labels.list を呼び出して名前→IDの対応表を作成する処理を追加した。
+対応するラベルが存在しない場合は users.labels.create を呼び出して作成し、作成済みIDを labelIds に設定するようにした。
+labelIds の生成は import 前に 1 回行い、添付削除の再試行やシステムメッセージのインポートでも同一のID一覧を使うようにした。
+ラベル名の重複や大小文字差を吸収するため、内部の集合比較は大文字小文字を無視して行うようにした。
+ビルドを実行してコンパイル成功を確認した。
+
+
+===================================================================
+日時: 2025/12/23 01:07:09 JST
+開発者によって指示された指示の内容: 251223_BBAX3A ユーザーフィルタの暗黙 using 追加
+作業内容の概要: LibMailFilterExec のコンパイル時に dn_pop3_to_gmail_forwarder を暗黙 using 化
+AI エンジン: GPT-5 (Codex CLI) 推論レベル: 標準
+AI 実行コンピュータ名: pc34
+関連タグ: 251223_BBAX3A, 251223_BBEK4Q
+編集したファイルの一覧: lib_mailfilter.cs
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): LibMailFilterExec.CompileToFilterDelegate, LibMailFilterExec.BuildUserSourceWithImplicitUsings
+実装において迷った点 (もしあれば): 特になし。
+参考文献 (複数あってよい): なし
+
+
+LibMailFilterExec のユーザーコードコンパイル前に、dn_pop3_to_gmail_forwarder の using を暗黙に付与する処理を追加した。
+ユーザーコードに同一の using または global using が含まれている場合は重複付与しないようにした。
+これにより、ユーザーフィルタ側でネームスペースを明示せずに MailForwardFilterResult / MailForwardFilterParam を参照できるようにした。
+ビルドを実行し、コンパイル成功を確認した。
+
+
+===================================================================
 日時: 2025/12/23 00:41:15 JST
 開発者によって指示された指示の内容: 251223_AQCX8B 設定検査モードの追加
 作業内容の概要: check モード追加とフィルタ試験実行の実装
@@ -37,4 +76,3 @@ filter_csharp_filename が指定されている場合は、ダミーの MailMeta
 アーカイブ保存形式を仕様どおりに拡張し、MailMetaData と MailForwardFilterResult の JSON をそれぞれ区切り付きで保存するよう更新した。
 Gmail インポート時の labelIds を、INBOX 常時付与、MarkAsRead による UNREAD 制御、LabelList の追加に対応させた。
 ビルドは tasks.json の build 相当で実行し、成功を確認した。
-
