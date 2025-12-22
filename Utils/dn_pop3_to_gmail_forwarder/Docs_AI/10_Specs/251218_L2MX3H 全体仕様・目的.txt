@@ -28,6 +28,10 @@
   (b) 「メール転送実施モード」 (forward モード) [AC579L84]
     - これについては、「3.」で詳述する。
 
+  (c) 「設定検査モード」 (check モード) [251222_ZYMQ4U]
+    - コマンドライン: 「check --config <設定ファイル>」 とする。
+    - このモードは、(b) のモードと同様に config ファイルを読み込み、config ファイルの内容に形式的な不備がないかどうかチェックする。そのチェックルーチンは、[AC579L84] でのチェックルーチンと同一とする。実際に POP3 メールサーバーや Gmail メールサーバーとの間で一切通信することなく、config ファイルのみをチェックできる。
+    - また、config ファイルのチェックにおいて、「filter_csharp_filename」が指定されている場合は、形式的に、このユーザーフィルタプログラムのコンパイルと 1 回限りの実行を試みる。すなわち、実際に「UserFilterClass.UserFilter」を呼び出してみて、例外が発生しないかどうか試してみる。ここで、「UserFilterClass.UserFilter」を呼び出す際に必要な MailForwardFilterParam パラメータにおける Mail メンバには、ダミーの MailMetaData を入れる。すべてのフィールドに、適当な乱数で生成したあり得ないようなサンプルのユーザー名やメールアドレス、本文などを入れた状態で「UserFilterClass.UserFilter」を呼び出してみること。
 
 3. メール転送実施モードの仕様 [AC579L84]
 
@@ -51,7 +55,7 @@ log_dir = "data/log/"
 [filter]
 
 # [任意] 転送フィルタをユーザーが実装する C# ソースコードのファイル名 (相対パスを指定した場合は、この TOML 設定ファイルが存在するディレクトリからの相対パスとなる)
-filter_csharp_filename = "secret_filter.cs"
+filter_csharp_filename = "user_filter/filter.cs"
 
 
 ## メールの転送元 (POP3 受信側メールボックス) の認証設定
@@ -150,6 +154,7 @@ gmail_system_message_mail_address = "nobody <nobody@example.org>"
 
   パース結果の MailMetaData のうち、MailSize、DateTime_Received、AddressList_From、AddressList_To、Subject、MessageId の項目を、人間にわかりやすく、「POP3 サーバーから取得したメールの内容」として、Info ログとして出力する。
 
+ (a-3) (a-2) で取得したメールに対して、メールフィルタ [251222_ZXH7N7] を実行し、ユーザー定義のフィルタ関数を呼び出す。そして、結果を MailForwardFilterResult 型として受け取る。
  
  (b) (a-2) で取得したメールを、アーカイブに保存する。アーカイブは、設定の「archive_dir」ディレクトリ内を作成し、さらに「YYMMDD」というサブディレクトリを作成し、その中に「YYMMDD_HHMMSS_SHA1_FROM64.txt」というファイル名で保存する (すでに txt が存在する場合は、上書きをする)。
    - YYMMDD と HHMMSS は、MailMetaData の DateTime_Received を、プログラムを実行しているコンピュータのローカル時刻にした日時 (日付 6 桁、時刻 6 桁) である。DateTime_Received が不明の場合は、「(a) で取得をした時点の日付 + 午前 00:00:00 の時刻」とすること。DateTime_Header は信頼できないので、参照しない。[CQVFZY4W]
@@ -157,7 +162,8 @@ gmail_system_message_mail_address = "nobody <nobody@example.org>"
    - FROM64 の部分は、MailMetaData の AddressList_From におけるメールアドレス部分 (aaa@example.org のような部分) をそのまま記載する。ただし、「a-z」「A-Z」「0-9」「@」「+」「-」「_」「.」以外の文字は、すべて、安全のため、「_」に置換すること。また、文字数が 64 文字を超える場合は、先頭 64 文字のみにすること。
    - txt ファイルの内容は、次のようなバイナリファイルとすること。
      -- 先頭に、UTF-8 の BOM を付ける。
-     -- ファイルの先頭部分には、まず、2 行改行を開けてから、MailMetaData をそのままシリアライズ化した結果の JSON データがバイナリとして貼り付けられる (その内部表現形式は JSON であるので UTF-8 である)。
+     -- ファイルの先頭部分には、まず、2 行改行を開けてから、「-- BEGIN MailMetaData --」と記載し、1行改行をして、MailMetaData をそのままシリアライズ化した結果の JSON データがバイナリとして貼り付けられる (その内部表現形式は JSON であるので UTF-8 である)。最後に、「-- END MailMetaData --」と記載し、1 行改行をする。
+     -- 次に、2 行改行を開けてから、「-- BEGIN MailForwardFilterResult --」と記載し、1行改行をして、MailForwardFilterResult をそのままシリアライズ化した結果の JSON データがバイナリとして貼り付けられる (その内部表現形式は JSON であるので UTF-8 である)。最後に、「-- END MailForwardFilterResult --」と記載し、1 行改行をする。[251222_ZXH7N7]
      -- 次に、JSON データの次に 2 行改行を開けて、「===================================================================」 [U2LFKTKR] という文字列を貼り付け、改行する。
      -- 最後に、元の (a) で取得したこのメールの内容バイナリを、一切変更せず、そのまま書き出す。
    - つまり、1 個の txt ファイルに、メールを MailMetaData にパースした結果 (メタデータ的なもの) と、メールのデコード前のデータ (生データ) とが、[U2LFKTKR] という区切り文字列を境界として、共存している状態の内容とする。
@@ -171,7 +177,10 @@ gmail_system_message_mail_address = "nobody <nobody@example.org>"
    
    [B] Gmail API を呼び出すためのクレデンシャルは、[F3QBRBA9] で作成された、[A44FBNFX] 内の 「token_json」に指定されている JSON ファイルを使用すること。この JSON ファイルをまず読み取りで読む。LastRefreshDt よりも gmail_token_refresh_interval_secs 秒以上経過していたら、トークンの更新処理行なう。トークンの更新処理で新しいトークンが得られたら、「token_json」に指定されている JSON ファイルにそのトークンを書き込むこと。
    
-   [C] Gmail API では、「users.messages.import」 API を用いて、この 1 件のメールのデータ ((a) で取得したものそのまま) を、「INBOX」「UNREAD」というラベルを確実に付けた上で、ユーザーの Gmail 受信トレイに書き込む。[T3C34TDJ]
+   [C] Gmail API では、「users.messages.import」 API を用いて、この 1 件のメールのデータ ((a) で取得したものそのまま) を、ユーザーの Gmail 受信トレイに書き込む。[T3C34TDJ] [251222_ZXH7N7]
+      - ここで、まず、「INBOX」というラベルを確実に付ける。これは、Gmail の「受信トレイ」にインポートすることを明示的に意味する。
+      - 次に、MailForwardFilterResult の MarkAsRead が false の場合は、「UNREAD」というラベルを確実に付ける (Gmail 上での既読を意味)。つまり、フィルタ結果として MarkAsRead が true の場合は、「UNREAD」というラベルを確実に付けない (Gmail 上での既読を意味)。
+      - そして、MailForwardFilterResult の LabelList に記載されている名前のラベル (これは、Gmail のユーザー定義ラベル名を意味する) がある場合 (複数指定されている場合もある) は、それらのラベルを必ず付ける。
       - インポート時は、neverMarkSpam=True オプションを有効にすること。[N9YQARM8]
 
   Info ログとして、書き込み対象メールの MailSize、DateTime_Received、AddressList_From、AddressList_To、Subject、MessageId と、これが Gmail メールボックスに書き込み完了した旨を、わかりやすく、出力する。
@@ -310,6 +319,37 @@ Received: by mail-qv1-f48.google.com with SMTP id aaaa-bbbba.0
 (3) (2) のインポート時に、万一システムメッセージのインポートでエラーが発生したら、その旨は Error ログとして記録するが、例外はキャッチし、無視して続行する。
 
 
+
+94. メールフィルタ [251222_ZXH7N7]
+(1) 本アプリケーションのメール転送機能においては、入力メール (POP3 から入ってくるメール) 1 件ずつに対して、フィルタ関数を通し、これにより、出力 (Gmail へのインポート) 時の挙動を変化させることができる。
+(2) (1) のフィルタ関数は、本ソフトウェアのユーザーが、本ソフトウェア本体のソースコードをリビルドすることなく、本ソフトウェアの「外部モジュール」としてユーザー定義スクリプトを C# で実装することができるというものである。
+(3) (2) の仕組みは、すでに実装済みの「lib_mailfilter.cs」の「LibMailFilterExec.CompileAndInvokeUserFilter」メソッドによって実現可能である。この「LibMailFilterExec.CompileAndInvokeUserFilter」メソッドは、入力引数として、「string sourceCode, MailForwardFilterParam param」をとる。sourceCode には、ユーザーが記述したユーザー定義関数が含まれた c# のソースコードの本文文字列を入れる。param には、フィルタにかけるメールを入れる。param.Mail はメール本体 (MailMetaData) である。
+(4) sourceCode に入れるべきユーザー定義コードは、設定ファイルの「[filter]」の「filter_csharp_filename」としてファイル名が指定されている。このファイルを普通のファイルとして読み込んで、「LibMailFilterExec.CompileAndInvokeUserFilter」にかければよい。(「[filter]」の「filter_csharp_filename」としてファイル名が指定されていない場合は、ユーザー定義フィルタは存在しないことを意味する。この場合は、 MailForwardFilterResult を単に new() しただけのデフォルトフィルタ結果を用いて処理すること。すなわち、特別な処理はしない、ということになる。 [251223_ADBP7R])
+(5) ユーザーは、以下の [251223_ABQ2UB] のようなフィルタプログラムをC#で記述し、「[filter]」の「filter_csharp_filename」として指定したファイル名で設置することになる。
+  ここで、「MailForwardFilterParam」と「MailForwardFilterResult」の内容・意味は、すでに定義済みの MailForwardFilterParam と MailForwardFilterResult の 2 つのクラスのコメントおよび定義を参照すること。
+
+--- [251223_ABQ2UB] ここから ---
+public static class UserFilterClass
+{
+    public static MailForwardFilterResult UserFilter(MailForwardFilterParam mail)
+    {
+        MailForwardFilterResult result = new();
+
+        // ここで mail の内容を検査して何らかのフィルタ処理を実施
+
+        result.MarkAsRead = true;
+
+        result.LabelList.Add(""Label1"");
+        result.LabelList.Add(""Label2"");
+
+        return result;
+    }
+}
+--- [251223_ABQ2UB] ここまで ---
+
+(6) フィルタの実行中に (要するに 「LibMailFilterExec.CompileAndInvokeUserFilter」 の呼出し時に)、何らかの例外が発生する可能性がある。原因は、ユーザーコードのコンパイルエラーのほか、実行時エラー等である。そのような例外が発生した場合は、Error ログとして、その例外の内容とともに、その旨を詳しく Error ログに記載して (書き込み対象メールの MailSize、DateTime_Received、AddressList_From、AddressList_To、Subject、MessageId を、わかりやすく、併記する)、かつ、[251223_ADBP7R] と同一の処理をする (つまり、特になにもせずメールは転送される)。要するにフィルタを実行しようとしていかなる問題が発生しても、必ず、処理は続行されなければならない。
+
+(7) フィルタの結果は、1 メール毎に、MailForwardFilterResult として結論される。この MailForwardFilterResult の結果に基づき、Gmail へのインポート時の挙動を調整する。詳しくは、[T3C34TDJ] を参照すること。
 
 99. 使用ライブラリ (Nuget) [Q9MZU6D5]
 - TOML 設定ファイルの読み書きが必要な場合には、「Tomlyn」ライブラリを使用すること。

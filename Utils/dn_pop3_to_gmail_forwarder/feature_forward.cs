@@ -188,7 +188,9 @@ public static class FeatureForward
 
                 logger.Info(BuildMailMetaSummary("POP3 mail meta", meta));
 
-                await SaveArchiveAsync(config, meta, rawMail, fetchedNow, logger, cancel).ConfigureAwait(false);
+                MailForwardFilterResult filterResult = ExecuteMailFilter(config, meta, logger);
+
+                await SaveArchiveAsync(config, meta, filterResult, rawMail, fetchedNow, logger, cancel).ConfigureAwait(false);
 
                 // Gmail 転送 (大きすぎる場合はスキップ)
                 if (rawMail.Length > config.Gmail.GmailMaxMailSize)
@@ -198,7 +200,7 @@ public static class FeatureForward
                 else
                 {
                     string accessToken = await EnsureGmailAccessTokenAsync(config, logger, cancel).ConfigureAwait(false);
-                    GmailImportOutcome importOutcome = await GmailApiImportAsync(config, accessToken, rawMail, meta, cancel).ConfigureAwait(false);
+                    GmailImportOutcome importOutcome = await GmailApiImportAsync(config, accessToken, rawMail, meta, filterResult, cancel).ConfigureAwait(false);
                     switch (importOutcome)
                     {
                         case GmailImportOutcome.ImportedOriginal:
@@ -1031,19 +1033,75 @@ public static class FeatureForward
     }
 
     /// <summary>
+    /// メールフィルタを実行し、フィルタ結果を取得します。[251222_ZXH7N7]
+    /// </summary>
+    /// <param name="config">設定です。</param>
+    /// <param name="meta">メールメタデータです。</param>
+    /// <param name="logger">ロガーです。</param>
+    /// <returns>フィルタ結果です。(常に null 以外)</returns>
+    private static MailForwardFilterResult ExecuteMailFilter(ForwardConfig config, MailMetaData meta, ForwardLogger logger)
+    {
+        if (config == null) throw new ArgumentNullException(nameof(config));
+        if (meta == null) throw new ArgumentNullException(nameof(meta));
+        if (logger == null) throw new ArgumentNullException(nameof(logger));
+
+        string sourceCode = config.Filter?.FilterSourceCode ?? "";
+        if (string.IsNullOrWhiteSpace(sourceCode))
+        {
+            return new MailForwardFilterResult();
+        }
+
+        try
+        {
+            var param = new MailForwardFilterParam
+            {
+                Mail = meta,
+            };
+
+            MailForwardFilterResult? result = LibMailFilterExec.CompileAndInvokeUserFilter(sourceCode, param);
+
+            if (result == null)
+            {
+                logger.Error(BuildMailMetaSummary("User filter returned null. Using default filter result", meta));
+                return new MailForwardFilterResult();
+            }
+
+            if (result.LabelList == null)
+            {
+                result.LabelList = new HashSet<string>();
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            string msg = BuildMailMetaSummary("User filter execution failed. Using default filter result", meta);
+            if (string.IsNullOrWhiteSpace(config.Filter?.FilterCSharpFilePath) == false)
+            {
+                msg += $" FilterFile={config.Filter.FilterCSharpFilePath}";
+            }
+            msg += " Exception: " + ex.ToString();
+            logger.Error(msg);
+            return new MailForwardFilterResult();
+        }
+    }
+
+    /// <summary>
     /// アーカイブファイルを書き出します。
     /// </summary>
     /// <param name="config">設定です。</param>
     /// <param name="meta">メタデータです。</param>
+    /// <param name="filterResult">フィルタ結果です。</param>
     /// <param name="rawMail">生メールです。</param>
     /// <param name="fetchedNow">取得時刻です。</param>
     /// <param name="logger">ロガーです。</param>
     /// <param name="cancel">キャンセル要求です。</param>
     /// <returns>保存先パスです。</returns>
-    private static async Task<string> SaveArchiveAsync(ForwardConfig config, MailMetaData meta, byte[] rawMail, DateTimeOffset fetchedNow, ForwardLogger logger, CancellationToken cancel)
+    private static async Task<string> SaveArchiveAsync(ForwardConfig config, MailMetaData meta, MailForwardFilterResult filterResult, byte[] rawMail, DateTimeOffset fetchedNow, ForwardLogger logger, CancellationToken cancel)
     {
         if (config == null) throw new ArgumentNullException(nameof(config));
         if (meta == null) throw new ArgumentNullException(nameof(meta));
+        if (filterResult == null) throw new ArgumentNullException(nameof(filterResult));
         if (rawMail == null) throw new ArgumentNullException(nameof(rawMail));
         if (logger == null) throw new ArgumentNullException(nameof(logger));
 
@@ -1065,6 +1123,14 @@ public static class FeatureForward
         string metaJsonBody = JsonConvert.SerializeObject(meta, LibCommon.CreateStandardJsonSerializerSettings());
         metaJsonBody = metaJsonBody.Replace("\r\n", "\n").Replace("\r", "\n").TrimEnd('\n');
 
+        if (filterResult.LabelList == null)
+        {
+            filterResult.LabelList = new HashSet<string>();
+        }
+
+        string filterJsonBody = JsonConvert.SerializeObject(filterResult, LibCommon.CreateStandardJsonSerializerSettings());
+        filterJsonBody = filterJsonBody.Replace("\r\n", "\n").Replace("\r", "\n").TrimEnd('\n');
+
         string sha1Hex = ComputeSha1Hex(Encoding.UTF8.GetBytes(metaJsonBody));
 
         string from64 = BuildFrom64(meta.AddressList_From);
@@ -1078,14 +1144,31 @@ public static class FeatureForward
         byte[] bom = new byte[] { 0xEF, 0xBB, 0xBF };
         byte[] sep = Encoding.ASCII.GetBytes("===================================================================\n");
         byte[] lf2 = Encoding.ASCII.GetBytes("\n\n");
+        byte[] beginMeta = Encoding.ASCII.GetBytes("-- BEGIN MailMetaData --\n");
+        byte[] endMeta = Encoding.ASCII.GetBytes("\n-- END MailMetaData --\n");
+        byte[] beginFilter = Encoding.ASCII.GetBytes("-- BEGIN MailForwardFilterResult --\n");
+        byte[] endFilter = Encoding.ASCII.GetBytes("\n-- END MailForwardFilterResult --\n");
 
         using (var fs = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.None))
         {
             await fs.WriteAsync(bom, 0, bom.Length, cancel).ConfigureAwait(false);
             await fs.WriteAsync(lf2, 0, lf2.Length, cancel).ConfigureAwait(false);
 
+            await fs.WriteAsync(beginMeta, 0, beginMeta.Length, cancel).ConfigureAwait(false);
+
             byte[] metaBytes = Encoding.UTF8.GetBytes(metaJsonBody);
             await fs.WriteAsync(metaBytes, 0, metaBytes.Length, cancel).ConfigureAwait(false);
+
+            await fs.WriteAsync(endMeta, 0, endMeta.Length, cancel).ConfigureAwait(false);
+
+            await fs.WriteAsync(lf2, 0, lf2.Length, cancel).ConfigureAwait(false);
+
+            await fs.WriteAsync(beginFilter, 0, beginFilter.Length, cancel).ConfigureAwait(false);
+
+            byte[] filterBytes = Encoding.UTF8.GetBytes(filterJsonBody);
+            await fs.WriteAsync(filterBytes, 0, filterBytes.Length, cancel).ConfigureAwait(false);
+
+            await fs.WriteAsync(endFilter, 0, endFilter.Length, cancel).ConfigureAwait(false);
 
             await fs.WriteAsync(lf2, 0, lf2.Length, cancel).ConfigureAwait(false);
             await fs.WriteAsync(sep, 0, sep.Length, cancel).ConfigureAwait(false);
@@ -1272,25 +1355,105 @@ public static class FeatureForward
     }
 
     /// <summary>
+    /// Gmail API import 用のメタデータ JSON を生成します。[251222_ZXH7N7]
+    /// </summary>
+    /// <param name="filterResult">フィルタ結果です。</param>
+    /// <returns>JSON 文字列です。(改行は LF のみ)</returns>
+    private static string BuildGmailImportMetaJson(MailForwardFilterResult filterResult)
+    {
+        if (filterResult == null) throw new ArgumentNullException(nameof(filterResult));
+
+        List<string> labelIds = BuildGmailLabelIdList(filterResult);
+
+        string metaJson = JsonConvert.SerializeObject(new { labelIds = labelIds }, LibCommon.CreateStandardJsonSerializerSettings());
+        metaJson = metaJson.Replace("\r\n", "\n").Replace("\r", "\n");
+
+        return metaJson;
+    }
+
+    /// <summary>
+    /// Gmail API import の labelIds を生成します。[251222_ZXH7N7]
+    /// </summary>
+    /// <param name="filterResult">フィルタ結果です。</param>
+    /// <returns>labelIds の一覧です。</returns>
+    private static List<string> BuildGmailLabelIdList(MailForwardFilterResult filterResult)
+    {
+        if (filterResult == null) throw new ArgumentNullException(nameof(filterResult));
+
+        var list = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        AddGmailLabelIfMissing(seen, list, "INBOX");
+
+        if (filterResult.MarkAsRead == false)
+        {
+            AddGmailLabelIfMissing(seen, list, "UNREAD");
+        }
+
+        if (filterResult.LabelList != null && filterResult.LabelList.Count >= 1)
+        {
+            var customLabels = filterResult.LabelList
+                .Where(x => string.IsNullOrWhiteSpace(x) == false)
+                .Select(x => (x ?? "").Trim())
+                .Where(x => x.Length >= 1)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(x => x, StringComparer.Ordinal)
+                .ToList();
+
+            foreach (string label in customLabels)
+            {
+                AddGmailLabelIfMissing(seen, list, label);
+            }
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// labelIds にラベルを追加します。(重複や空文字は追加しません)
+    /// </summary>
+    /// <param name="seen">追加済み判定用のセットです。</param>
+    /// <param name="list">出力先リストです。</param>
+    /// <param name="label">追加するラベル文字列です。</param>
+    private static void AddGmailLabelIfMissing(HashSet<string> seen, List<string> list, string label)
+    {
+        if (seen == null) throw new ArgumentNullException(nameof(seen));
+        if (list == null) throw new ArgumentNullException(nameof(list));
+        if (string.IsNullOrWhiteSpace(label)) return;
+
+        string trimmed = label.Trim();
+        if (trimmed.Length == 0) return;
+
+        if (seen.Add(trimmed))
+        {
+            list.Add(trimmed);
+        }
+    }
+
+    /// <summary>
     /// Gmail API の users.messages.import を呼び出します。
     /// </summary>
     /// <param name="config">設定です。</param>
     /// <param name="accessToken">アクセストークンです。</param>
     /// <param name="rawMail">メールの生データです。</param>
     /// <param name="meta">メールメタデータです。</param>
+    /// <param name="filterResult">フィルタ結果です。</param>
     /// <param name="cancel">キャンセル要求です。</param>
     /// <returns>インポート結果種別です。</returns>
-    private static async Task<GmailImportOutcome> GmailApiImportAsync(ForwardConfig config, string accessToken, byte[] rawMail, MailMetaData meta, CancellationToken cancel)
+    private static async Task<GmailImportOutcome> GmailApiImportAsync(ForwardConfig config, string accessToken, byte[] rawMail, MailMetaData meta, MailForwardFilterResult filterResult, CancellationToken cancel)
     {
         if (config == null) throw new ArgumentNullException(nameof(config));
         if (accessToken == null) throw new ArgumentNullException(nameof(accessToken));
         if (rawMail == null) throw new ArgumentNullException(nameof(rawMail));
         if (meta == null) throw new ArgumentNullException(nameof(meta));
+        if (filterResult == null) throw new ArgumentNullException(nameof(filterResult));
 
         using HttpClient httpClient = CreateHttpClientForGmail(config);
 
+        string importMetaJson = BuildGmailImportMetaJson(filterResult);
+
         // まずは元メールのインポートを試みる
-        GmailApiImportCallResult first = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, rawMail, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);
+        GmailApiImportCallResult first = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, rawMail, importMetaJson, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);
         if (first.IsSuccess)
         {
             return GmailImportOutcome.ImportedOriginal;
@@ -1306,7 +1469,7 @@ public static class FeatureForward
         byte[]? stepA = TryBuildMailBytesForBadRequestStepA(rawMail);
         if (stepA != null)
         {
-            GmailApiImportCallResult r = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, stepA, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);
+            GmailApiImportCallResult r = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, stepA, importMetaJson, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);
             if (r.IsSuccess) return GmailImportOutcome.ImportedAfterAttachmentRemovalStepA;
             if (r.StatusCode != HttpStatusCode.BadRequest)
             {
@@ -1318,7 +1481,7 @@ public static class FeatureForward
         byte[]? stepB = TryBuildMailBytesForBadRequestStepB(rawMail);
         if (stepB != null)
         {
-            GmailApiImportCallResult r = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, stepB, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);
+            GmailApiImportCallResult r = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, stepB, importMetaJson, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);
             if (r.IsSuccess) return GmailImportOutcome.ImportedAfterAttachmentRemovalStepB;
             if (r.StatusCode != HttpStatusCode.BadRequest)
             {
@@ -1330,7 +1493,7 @@ public static class FeatureForward
         byte[]? stepC = TryBuildMailBytesForBadRequestStepC(rawMail);
         if (stepC != null)
         {
-            GmailApiImportCallResult r = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, stepC, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);
+            GmailApiImportCallResult r = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, stepC, importMetaJson, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);
             if (r.IsSuccess) return GmailImportOutcome.ImportedAfterAttachmentRemovalStepC;
             if (r.StatusCode != HttpStatusCode.BadRequest)
             {
@@ -1343,7 +1506,7 @@ public static class FeatureForward
 
         try
         {
-            GmailApiImportCallResult sysResp = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, sysMsg, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);
+            GmailApiImportCallResult sysResp = await GmailApiImportRawMessageWithRetriesAsync(httpClient, accessToken, sysMsg, importMetaJson, config.Gmail.TcpRetryAttempts, cancel).ConfigureAwait(false);
             if (sysResp.IsSuccess)
             {
                 return GmailImportOutcome.ImportedSystemMessageInstead;
@@ -1390,21 +1553,20 @@ public static class FeatureForward
     /// <param name="httpClient">HTTP クライアントです。</param>
     /// <param name="accessToken">アクセストークンです。</param>
     /// <param name="rawMail">メール生データです。</param>
+    /// <param name="importMetaJson">インポート用メタデータ JSON です。</param>
     /// <param name="retryAttempts">最大リトライ回数です。</param>
     /// <param name="cancel">キャンセル要求です。</param>
     /// <returns>呼び出し結果です。</returns>
-    private static async Task<GmailApiImportCallResult> GmailApiImportRawMessageWithRetriesAsync(HttpClient httpClient, string accessToken, byte[] rawMail, int retryAttempts, CancellationToken cancel)
+    private static async Task<GmailApiImportCallResult> GmailApiImportRawMessageWithRetriesAsync(HttpClient httpClient, string accessToken, byte[] rawMail, string importMetaJson, int retryAttempts, CancellationToken cancel)
     {
         if (httpClient == null) throw new ArgumentNullException(nameof(httpClient));
         if (accessToken == null) throw new ArgumentNullException(nameof(accessToken));
         if (rawMail == null) throw new ArgumentNullException(nameof(rawMail));
+        if (importMetaJson == null) throw new ArgumentNullException(nameof(importMetaJson));
         if (retryAttempts <= 0) throw new ArgumentOutOfRangeException(nameof(retryAttempts));
 
         // ★ Gmail API users.messages.import は multipart upload を用いて、生メールデータを base64 変換せずに送信する
         //    これにより、サイズ増大 (base64 の 4/3) を回避し、(a) の生データをそのまま送れる。
-        string metaJson = JsonConvert.SerializeObject(new { labelIds = new[] { "INBOX", "UNREAD" } }, LibCommon.CreateStandardJsonSerializerSettings());
-        metaJson = metaJson.Replace("\r\n", "\n").Replace("\r", "\n");
-
         // ★ インポート時は neverMarkSpam=True を有効化する [N9YQARM8]
         const string Url = "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/import?uploadType=multipart&neverMarkSpam=true";
 
@@ -1422,7 +1584,7 @@ public static class FeatureForward
                 using var multipart = new MultipartContent("related");
 
                 // part 1: JSON metadata
-                var jsonPart = new StringContent(metaJson, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), "application/json");
+                var jsonPart = new StringContent(importMetaJson, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), "application/json");
                 multipart.Add(jsonPart);
 
                 // part 2: raw message
@@ -2229,6 +2391,33 @@ public static class FeatureForward
             throw new Exception(LibCommon.AppendExceptionDetail("APPERROR: Invalid TOML value: gmail.gmail_system_message_mail_address", ex), ex);
         }
 
+        // filter
+        string filterFileName = GetOptionalString(model, "filter", "filter_csharp_filename");
+        string filterFilePath = "";
+        string filterSource = "";
+
+        if (string.IsNullOrWhiteSpace(filterFileName) == false)
+        {
+            filterFilePath = ResolveConfigPath(configDir, filterFileName);
+
+            if (File.Exists(filterFilePath) == false)
+            {
+                throw new Exception($"APPERROR: filter_csharp_filename file not found: {filterFilePath}");
+            }
+
+            filterSource = await File.ReadAllTextAsync(filterFilePath, cancel).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(filterSource))
+            {
+                throw new Exception($"APPERROR: filter_csharp_filename file is empty: {filterFilePath}");
+            }
+        }
+
+        cfg.Filter = new FilterConfig
+        {
+            FilterCSharpFilePath = filterFilePath,
+            FilterSourceCode = filterSource,
+        };
+
         return cfg;
     }
 
@@ -2525,6 +2714,11 @@ public static class FeatureForward
         /// gmail セクションです。
         /// </summary>
         public GmailConfig Gmail = new GmailConfig();
+
+        /// <summary>
+        /// filter セクションです。
+        /// </summary>
+        public FilterConfig Filter = new FilterConfig();
     }
 
     /// <summary>
@@ -2679,6 +2873,22 @@ public static class FeatureForward
         /// システムメッセージの仮想メールアドレスです。[A44FBNFX][HA7DHHGE]
         /// </summary>
         public string GmailSystemMessageMailAddress = "";
+    }
+
+    /// <summary>
+    /// filter 設定です。[251222_ZXH7N7]
+    /// </summary>
+    private sealed class FilterConfig
+    {
+        /// <summary>
+        /// ユーザーフィルタ C# ソースコードのファイルパスです。(フルパス)
+        /// </summary>
+        public string FilterCSharpFilePath = "";
+
+        /// <summary>
+        /// ユーザーフィルタ C# ソースコード本文です。未指定の場合は空文字です。
+        /// </summary>
+        public string FilterSourceCode = "";
     }
 
     /// <summary>
