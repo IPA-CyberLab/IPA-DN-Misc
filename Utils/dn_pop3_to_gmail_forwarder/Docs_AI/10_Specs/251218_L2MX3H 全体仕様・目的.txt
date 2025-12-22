@@ -47,6 +47,13 @@ archive_dir = "data/archive/"
 log_dir = "data/log/"
 
 
+## 転送フィルタ設定
+[filter]
+
+# [任意] 転送フィルタをユーザーが実装する C# ソースコードのファイル名 (相対パスを指定した場合は、この TOML 設定ファイルが存在するディレクトリからの相対パスとなる)
+filter_csharp_filename = "secret_filter.cs"
+
+
 ## メールの転送元 (POP3 受信側メールボックス) の認証設定
 [pop3]
 

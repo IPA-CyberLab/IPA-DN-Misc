@@ -174,7 +174,12 @@ namespace [CC8X8CXS];
 111. テキスト処理 [WUZK8R3U]
 (1) .NET の文字列エンコーディング機能において、ISO-2022-JP / Shift JIS など旧来エンコーディング対応をするため、プログラムの初期化時においては、必ず、「Encoding.RegisterProvider (CodePagesEncodingProvider.Instance);」を実施せよ。これを実施しない場合、エンコーディングで使用できないものがある。
 
-
+121. アクセス修飾子
+(1) class, struct, enum, interface 等について
+- 内部でのみ使用するクラス等は、internal クラス等とする。この場合、「internal」アクセス修飾子の記載は省略せよ (見た目の文字数を減らすため)。
+- 外部に公開する可能性があるクラス等は、public クラス等とする。
+(2) メンバ変数、メンバ関数、プロパティ、static 変数、static 関数、static プロパティについて
+- public, private, protected, internal 等、適切にアクセス修飾子を付ける。ただし、「private」については、表記を省略せよ (見た目の文字数を減らすため)。
 
 
 9999. その他
