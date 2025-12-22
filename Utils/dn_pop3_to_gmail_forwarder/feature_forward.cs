@@ -1567,6 +1567,102 @@ public static class FeatureForward
     }
 
     /// <summary>
+    /// ラベル名階層の作成順序リストを生成します。[251223_CTSHY7]
+    /// </summary>
+    /// <param name="labelNames">ラベル名一覧です。</param>
+    /// <returns>作成順序のラベル名一覧です。</returns>
+    private static List<string> BuildGmailLabelHierarchyList(List<string> labelNames)
+    {
+        var list = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (labelNames == null) return list;
+
+        foreach (string rawName in labelNames)
+        {
+            string name = (rawName ?? "").Trim();
+            if (name.Length == 0) continue;
+
+            List<string> hierarchy = ExpandGmailLabelNameHierarchy(name);
+            foreach (string item in hierarchy)
+            {
+                if (seen.Add(item))
+                {
+                    list.Add(item);
+                }
+            }
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// ラベル名を「/」区切りで分解し、親→子の順で階層名を生成します。[251223_CTSHY7]
+    /// </summary>
+    /// <param name="labelName">ラベル名です。</param>
+    /// <returns>階層ラベル名一覧です。</returns>
+    private static List<string> ExpandGmailLabelNameHierarchy(string labelName)
+    {
+        var list = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(labelName)) return list;
+
+        string[] parts = labelName.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return list;
+
+        var sb = new StringBuilder();
+        for (int i = 0; i < parts.Length; i++)
+        {
+            string part = parts[i].Trim();
+            if (part.Length == 0) continue;
+
+            if (sb.Length > 0) sb.Append('/');
+            sb.Append(part);
+
+            list.Add(sb.ToString());
+        }
+
+        if (list.Count == 0)
+        {
+            list.Add(labelName.Trim());
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// Gmail のシステムラベル名かどうかを判定します。
+    /// </summary>
+    /// <param name="labelName">ラベル名です。</param>
+    /// <returns>システムラベルなら true です。</returns>
+    private static bool IsGmailSystemLabelName(string labelName)
+    {
+        if (string.IsNullOrWhiteSpace(labelName)) return false;
+        return GmailSystemLabelNameSet.Contains(labelName.Trim());
+    }
+
+    /// <summary>
+    /// Gmail のシステムラベル名セットです。
+    /// </summary>
+    private static readonly HashSet<string> GmailSystemLabelNameSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "CHAT",
+        "SENT",
+        "INBOX",
+        "IMPORTANT",
+        "TRASH",
+        "DRAFT",
+        "SPAM",
+        "STARRED",
+        "UNREAD",
+        "CATEGORY_PERSONAL",
+        "CATEGORY_SOCIAL",
+        "CATEGORY_PROMOTIONS",
+        "CATEGORY_UPDATES",
+        "CATEGORY_FORUMS",
+    };
+
+    /// <summary>
     /// ラベル名一覧を labelIds に変換します。[251223_BVHM5V]
     /// </summary>
     /// <param name="httpClient">HTTP クライアントです。</param>
@@ -1588,6 +1684,38 @@ public static class FeatureForward
         HashSet<string> idSet;
 
         (nameToIdMap, idSet) = await GetGmailLabelNameToIdMapAsync(httpClient, accessToken, cancel).ConfigureAwait(false);
+
+        // 「/」区切りラベルは親から順に作成して階層構造を成立させる [251223_CTSHY7]
+        List<string> hierarchyNames = BuildGmailLabelHierarchyList(labelNames);
+        foreach (string rawName in hierarchyNames)
+        {
+            cancel.ThrowIfCancellationRequested();
+
+            string name = (rawName ?? "").Trim();
+            if (name.Length == 0) continue;
+
+            if (IsGmailSystemLabelName(name)) continue;
+            if (nameToIdMap.ContainsKey(name)) continue;
+            if (idSet.Contains(name)) continue;
+
+            try
+            {
+                string createdId = await CreateGmailLabelAsync(httpClient, accessToken, name, cancel).ConfigureAwait(false);
+                nameToIdMap[name] = createdId;
+                idSet.Add(createdId);
+            }
+            catch (Exception ex)
+            {
+                // 作成に失敗した場合は再取得して存在確認を行う
+                (nameToIdMap, idSet) = await GetGmailLabelNameToIdMapAsync(httpClient, accessToken, cancel).ConfigureAwait(false);
+                if (nameToIdMap.ContainsKey(name))
+                {
+                    continue;
+                }
+
+                throw new Exception(LibCommon.AppendExceptionDetail($"APPERROR: Failed to create Gmail label hierarchy: {name}", ex), ex);
+            }
+        }
 
         var labelIds = new List<string>();
 
@@ -1611,25 +1739,13 @@ public static class FeatureForward
                 continue;
             }
 
-            try
+            if (IsGmailSystemLabelName(name))
             {
-                string createdId = await CreateGmailLabelAsync(httpClient, accessToken, name, cancel).ConfigureAwait(false);
-                nameToIdMap[name] = createdId;
-                idSet.Add(createdId);
-                labelIds.Add(createdId);
+                labelIds.Add(name);
+                continue;
             }
-            catch (Exception ex)
-            {
-                // 作成に失敗した場合は再取得して存在確認を行う
-                (nameToIdMap, idSet) = await GetGmailLabelNameToIdMapAsync(httpClient, accessToken, cancel).ConfigureAwait(false);
-                if (nameToIdMap.TryGetValue(name, out string? id2))
-                {
-                    labelIds.Add(id2);
-                    continue;
-                }
 
-                throw new Exception(LibCommon.AppendExceptionDetail($"APPERROR: Failed to create Gmail label: {name}", ex), ex);
-            }
+            throw new Exception($"APPERROR: Gmail label not found after creation: {name}");
         }
 
         return labelIds;
