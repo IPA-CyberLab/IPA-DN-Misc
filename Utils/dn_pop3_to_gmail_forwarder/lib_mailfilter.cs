@@ -21,7 +21,7 @@ public class MailForwardFilterParam
 
 public class MailForwardFilterResult
 {
-    public bool MarkAsRead; // Gmail に転送 (インポート) する際、[UNREAD] フラグを付けない。
+    public bool MarkAsRead = false; // Gmail に転送 (インポート) する際、[UNREAD] フラグを付けない。
     public HashSet<string> LabelList = new(); // Gmail に転送 (インポート) する際、指定した名前のラベルを付ける。(複数指定可能)
 }
 
@@ -219,7 +219,17 @@ public static class LibMailFilterExec
     {
         List<MetadataReference> refs = new();
 
+        HashSet<Assembly> asmList = new();
+
         foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            asmList.Add(asm);
+        }
+
+        // 正規表現アセンブリを必ずロード
+        asmList.Add(typeof(System.Text.RegularExpressions.Regex).Assembly);
+
+        foreach (Assembly asm in asmList)
         {
             string? location;
             try

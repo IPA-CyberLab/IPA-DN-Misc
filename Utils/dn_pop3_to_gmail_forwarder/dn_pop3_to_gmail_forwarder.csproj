@@ -22,7 +22,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="user_filter/**" />
+    <Compile Remove="user_filterz/**" />
   </ItemGroup>
 
   <ItemGroup>
