@@ -116,6 +116,41 @@ public static class FeatureForward
     }
 
     /// <summary>
+    /// check モードを実行します。[251222_ZYMQ4U]
+    /// </summary>
+    /// <param name="configPath">設定ファイルパスです。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    /// <returns>プロセス戻り値です。(0: 成功 / 1: 失敗)</returns>
+    public static async Task<int> RunCheckAsync(string configPath, CancellationToken cancel = default)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(configPath))
+            {
+                throw new Exception("APPERROR: --config is required.");
+            }
+
+            ForwardConfig config = await LoadConfigAsync(configPath, cancel).ConfigureAwait(false);
+
+            ExecuteUserFilterForCheckIfConfigured(config);
+
+            Console.WriteLine("Config check succeeded.");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            string msg = ex.Message ?? "Unknown error.";
+            if (msg.StartsWith("APPERROR:", StringComparison.OrdinalIgnoreCase) == false)
+            {
+                msg = "APPERROR: " + msg;
+            }
+
+            try { Console.Error.WriteLine(msg); } catch { }
+            return 1;
+        }
+    }
+
+    /// <summary>
     /// forward オプションの妥当性を検査します。
     /// </summary>
     /// <param name="options">実行パラメータです。</param>
@@ -125,6 +160,100 @@ public static class FeatureForward
         {
             throw new Exception("APPERROR: --config is required.");
         }
+    }
+
+    /// <summary>
+    /// check モードにおけるユーザーフィルタのコンパイルと 1 回実行を行ないます。[251222_ZYMQ4U]
+    /// </summary>
+    /// <param name="config">設定データです。</param>
+    private static void ExecuteUserFilterForCheckIfConfigured(ForwardConfig config)
+    {
+        if (config == null) throw new ArgumentNullException(nameof(config));
+
+        string sourceCode = config.Filter?.FilterSourceCode ?? "";
+        if (string.IsNullOrWhiteSpace(sourceCode))
+        {
+            return;
+        }
+
+        MailMetaData dummyMail = BuildDummyMailMetaDataForCheck();
+
+        var param = new MailForwardFilterParam
+        {
+            Mail = dummyMail,
+        };
+
+        try
+        {
+            MailForwardFilterResult? result = LibMailFilterExec.CompileAndInvokeUserFilter(sourceCode, param);
+            if (result == null)
+            {
+                throw new Exception("APPERROR: User filter returned null.");
+            }
+
+            if (result.LabelList == null)
+            {
+                result.LabelList = new HashSet<string>();
+            }
+        }
+        catch (Exception ex)
+        {
+            string msg = "APPERROR: User filter compile or execution failed.";
+            if (string.IsNullOrWhiteSpace(config.Filter?.FilterCSharpFilePath) == false)
+            {
+                msg += $" FilterFile={config.Filter.FilterCSharpFilePath}";
+            }
+            throw new Exception(LibCommon.AppendExceptionDetail(msg, ex), ex);
+        }
+    }
+
+    /// <summary>
+    /// check モードでユーザーフィルタに渡すダミーの MailMetaData を生成します。
+    /// </summary>
+    /// <returns>ダミーの MailMetaData です。</returns>
+    private static MailMetaData BuildDummyMailMetaDataForCheck()
+    {
+        // ★ 乱数で生成したあり得ないようなサンプルデータを作成する [251222_ZYMQ4U]
+        string token = Guid.NewGuid().ToString("N");
+        string shortToken = token.Substring(0, 8);
+        string domain = "example.invalid";
+
+        int mailSize = Random.Shared.Next(1000, 500000);
+
+        var meta = new MailMetaData
+        {
+            MailSize = mailSize,
+            Subject = $"DUMMY_SUBJECT_{token}",
+            DateTime_Header = DateTimeOffset.Now.AddMinutes(-Random.Shared.Next(1, 300)),
+            DateTime_Received = DateTimeOffset.Now,
+            MessageId = $"<{token}@{domain}>",
+            AddressList_From = new MailAddress($"from_{shortToken}@{domain}", $"Dummy From {shortToken}"),
+            AddressList_To = new List<MailAddress>(),
+            AddressList_Cc = new List<MailAddress>(),
+            AddressList_ReplyTo = new List<MailAddress>(),
+            AddressList_ReturnPath = new List<string>(),
+            AddressList_OriginalTo = new List<string>(),
+            AddressList_DeliveredTo = new List<string>(),
+            PlainTextBody = $"DUMMY_PLAIN_BODY_{token}",
+            HtmlBody = $"<html><body><p>DUMMY_HTML_BODY_{token}</p></body></html>",
+            HtmlBodyToPlainText = $"DUMMY_HTML_PLAIN_{token}",
+            AttachmentFileNamesList = new List<string>(),
+        };
+
+        meta.AddressList_To.Add(new MailAddress($"to_{shortToken}@{domain}"));
+        meta.AddressList_To.Add(new MailAddress($"to_{shortToken}_2@{domain}"));
+
+        meta.AddressList_Cc.Add(new MailAddress($"cc_{shortToken}@{domain}"));
+        meta.AddressList_ReplyTo.Add(new MailAddress($"reply_{shortToken}@{domain}"));
+
+        meta.AddressList_ReturnPath.Add($"return_{shortToken}@{domain}");
+        meta.AddressList_OriginalTo.Add($"original_{shortToken}@{domain}");
+        meta.AddressList_DeliveredTo.Add($"delivered_{shortToken}@{domain}");
+
+        meta.AttachmentFileNamesList.Add($"dummy_{shortToken}.txt");
+        meta.AttachmentFileNamesList.Add($"dummy_{shortToken}.zip");
+
+        return meta;
     }
 
     /// <summary>

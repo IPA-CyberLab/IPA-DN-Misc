@@ -145,6 +145,24 @@ public class Program
         root.AddCommand(getTokenCommand);
         root.AddCommand(forwardCommand);
 
+        var checkCommand = new Command("check", "Check mode: validate config without network access.");
+        var checkConfigOption = new Option<string>("--config", "Check mode TOML config file path.") { IsRequired = true };
+        checkCommand.AddOption(checkConfigOption);
+
+        checkCommand.SetHandler(async (InvocationContext context) =>
+        {
+            string configPath = context.ParseResult.GetValueForOption(checkConfigOption) ?? "";
+
+            var options = new FeatureCheck.CheckOptions
+            {
+                ConfigPath = configPath,
+            };
+
+            context.ExitCode = await FeatureCheck.RunAsync(options).ConfigureAwait(false);
+        });
+
+        root.AddCommand(checkCommand);
+
         return root;
     }
 }
