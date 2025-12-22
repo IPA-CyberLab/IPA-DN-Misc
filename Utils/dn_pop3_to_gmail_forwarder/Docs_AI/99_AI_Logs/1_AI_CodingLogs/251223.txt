@@ -96,3 +96,28 @@ filter_csharp_filename が指定されている場合は、ダミーの MailMeta
 アーカイブ保存形式を仕様どおりに拡張し、MailMetaData と MailForwardFilterResult の JSON をそれぞれ区切り付きで保存するよう更新した。
 Gmail インポート時の labelIds を、INBOX 常時付与、MarkAsRead による UNREAD 制御、LabelList の追加に対応させた。
 ビルドは tasks.json の build 相当で実行し、成功を確認した。
+
+
+===================================================================
+日時: 2025/12/23 03:37:24 JST
+開発者によって指示された指示の内容: 251223_DGDTM9 Gmail フィルタを filter.cs にマージ
+作業内容の概要: Gmail フィルタ XML を C# 条件へ変換しフィルタに反映
+AI エンジン: GPT-5 (Codex CLI) 推論レベル: 標準
+AI 実行コンピュータ名: pc34
+関連タグ: 251223_DGDTM9, 251223_DHK69G
+編集したファイルの一覧: user_filter/filter.cs
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): UserFilterClass.UserFilter, StrUtil.WildcardMatch, StrUtil.WildcardToRegex
+実装において迷った点 (もしあれば): from 条件のワイルドカード扱いと、ラベル/既読指定がない 4 件の扱い。
+参考文献 (複数あってよい): なし
+
+
+Gmail のフィルタ XML (user_filter/secret_gmail_filter.txt) を読み取り、from/to/subject/hasTheWord を
+大小文字を無視した包含判定として C# の条件に変換した。hasTheWord は本文の平文・HTML 変換のいずれかに
+含まれるかで判定し、shouldMarkAsRead と label を結果に反映するようにした。
+from 条件のうちワイルドカードを含むものは WildcardMatch を用い、その他は Contains で判定するように整理した。
+[251223_DHK69G] の領域へ既存の ICSCOE ルールと合わせてマージし、重複アクセスを避けるために
+from/to/subject/body のローカル変数を用意した。ラベル/既読指定がない 4 件は、元の仕様が残るよう
+コメント付きの no-op として残した。
+コーディング規約に合わせて UserFilter/StrUtil の XML ドキュメントコメントを追加した。
+dotnet build を実行し、ビルド成功を確認した。
+

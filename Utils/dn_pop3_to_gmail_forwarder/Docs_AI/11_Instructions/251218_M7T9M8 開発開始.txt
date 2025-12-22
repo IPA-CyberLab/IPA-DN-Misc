@@ -119,6 +119,19 @@ public static class UserFilterClass
         result.LabelList.Add("Label4/Label5");
 --- [251223_CTX6LY] ここまで ---
 
-
+251223_DGDTM9:
+Gmail の「フィルタ」の現在設定を filter.cs にマージする作業。
+(1) Gmail の「フィルタ」機能で、現在設定されているフィルタを Gmail の「フィルタを XML エクスポート」した 「user_filter/secret_gmail_filter.txt」ファイルがある。
+(2) 現在、手作りで作ってきている「user_filter/filter.cs」という C# ベースのユーザーフィルタファイルがある。
+(3) そこで、(1) のフィルタを、C# に変換し、(2) の現在 [251223_DHK69G] で囲まれている領域にマージせよ。
+    - この際、(1) の XML メールフィルタの各 entry における以下の項目をみること。
+      -- 条件:
+        -- from 条件。これは、m.AddressList_From?.Address のアドレスを検査することで、同様に判定できる。大文字小文字は区別しないべきである。
+        -- to 条件。これは、m.AddressList_To のいずれか 1 つにでも Address のアドレスに含まれているかどうかで判定すべきである。大文字小文字は区別しないべきである。
+        -- subject 条件。これは、m.Subject の文字列を検査することで、同様に判定できる。大文字小文字は区別しないべきである。
+        -- hasTheWord 条件。これは、m.HtmlBodyToPlainText または m.PlainTextBody に指定した文字列が含まれるかどうかで判定できる。大文字小文字は区別しないべきである。
+      -- 動作:
+        -- shouldMarkAsRead が付いていれば、result.MarkAsRead = true にする。
+        -- label が付いていれば、result.LabelList.Add する。
 
 

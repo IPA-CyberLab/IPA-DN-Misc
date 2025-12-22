@@ -3955,6 +3955,11 @@ public sealed class MailMetaData
     /// </summary>
     public string HtmlBody = "";
 
+    public string GetBodyAll()
+    {
+        return PlainTextBody + " " + HtmlBody;
+    }
+
     /// <summary>
     /// HtmlBody を、全文検索に投入可能な程度に、普通の平文文字列に置換した状態の文字列です。HTML メールではない場合は "" です。
     /// </summary>
