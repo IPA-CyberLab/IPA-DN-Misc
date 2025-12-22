@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.12.35527.113 d17.12
+# Visual Studio Version 18
+VisualStudioVersion = 18.00.00000.000
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "dn_pop3_to_gmail_forwarder", "dn_pop3_to_gmail_forwarder.csproj", "{D5D4A5D6-538D-4614-A996-AB0270BF60D0}"
 EndProject
