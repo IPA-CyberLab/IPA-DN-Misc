@@ -1247,7 +1247,7 @@ public static class FeatureForward
             local = new DateTimeOffset(fetchedLocal.Year, fetchedLocal.Month, fetchedLocal.Day, 0, 0, 0, fetchedLocal.Offset);
         }
 
-        string yyMMdd = local.ToString("yyMMdd", CultureInfo.InvariantCulture);
+        string yyyyMMdd = local.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
         string hhmmss = local.ToString("HHmmss", CultureInfo.InvariantCulture);
 
         string metaJsonBody = JsonConvert.SerializeObject(meta, LibCommon.CreateStandardJsonSerializerSettings());
@@ -1268,12 +1268,12 @@ public static class FeatureForward
         string from64 = BuildFrom64(meta.AddressList_From);
 
         bool enableGzip = config.Generic.ArchiveEnableGzip;
-        string fileName = $"{yyMMdd}_{hhmmss}_{sha1Hex}_{from64}.txt";
+        string fileName = $"{yyyyMMdd}_{hhmmss}_{sha1Hex}_{from64}.txt";
         if (enableGzip)
         {
             fileName += ".gz";
         }
-        string dir = Path.Combine(config.Generic.ArchiveDir, yyMMdd);
+        string dir = Path.Combine(config.Generic.ArchiveDir, yyyyMMdd);
         string fullPath = Path.Combine(dir, fileName);
 
         Directory.CreateDirectory(dir);
@@ -3472,7 +3472,7 @@ public static class FeatureForward
             {
                 Directory.CreateDirectory(_logDir);
 
-                string fileName = DateTimeOffset.Now.ToLocalTime().ToString("yyMMdd", CultureInfo.InvariantCulture) + ".log";
+                string fileName = DateTimeOffset.Now.ToLocalTime().ToString("yyyyMMdd", CultureInfo.InvariantCulture) + ".log";
                 string path = Path.Combine(_logDir, fileName);
 
                 // 改行は LF のみで保存
