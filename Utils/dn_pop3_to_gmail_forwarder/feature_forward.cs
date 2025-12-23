@@ -1261,11 +1261,18 @@ public static class FeatureForward
         string filterJsonBody = JsonConvert.SerializeObject(filterResult, LibCommon.CreateStandardJsonSerializerSettings());
         filterJsonBody = filterJsonBody.Replace("\r\n", "\n").Replace("\r", "\n").TrimEnd('\n');
 
-        string sha1Hex = ComputeSha1Hex(Encoding.UTF8.GetBytes(metaJsonBody));
+        byte[] metaBytes = Encoding.UTF8.GetBytes(metaJsonBody);
+        byte[] filterBytes = Encoding.UTF8.GetBytes(filterJsonBody);
+        string sha1Hex = ComputeSha1Hex(metaBytes);
 
         string from64 = BuildFrom64(meta.AddressList_From);
 
+        bool enableGzip = config.Generic.ArchiveEnableGzip;
         string fileName = $"{yyMMdd}_{hhmmss}_{sha1Hex}_{from64}.txt";
+        if (enableGzip)
+        {
+            fileName += ".gz";
+        }
         string dir = Path.Combine(config.Generic.ArchiveDir, yyMMdd);
         string fullPath = Path.Combine(dir, fileName);
 
@@ -1281,35 +1288,71 @@ public static class FeatureForward
 
         using (var fs = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.None))
         {
-            await fs.WriteAsync(bom, 0, bom.Length, cancel).ConfigureAwait(false);
-            await fs.WriteAsync(lf2, 0, lf2.Length, cancel).ConfigureAwait(false);
-
-            await fs.WriteAsync(beginMeta, 0, beginMeta.Length, cancel).ConfigureAwait(false);
-
-            byte[] metaBytes = Encoding.UTF8.GetBytes(metaJsonBody);
-            await fs.WriteAsync(metaBytes, 0, metaBytes.Length, cancel).ConfigureAwait(false);
-
-            await fs.WriteAsync(endMeta, 0, endMeta.Length, cancel).ConfigureAwait(false);
-
-            await fs.WriteAsync(lf2, 0, lf2.Length, cancel).ConfigureAwait(false);
-
-            await fs.WriteAsync(beginFilter, 0, beginFilter.Length, cancel).ConfigureAwait(false);
-
-            byte[] filterBytes = Encoding.UTF8.GetBytes(filterJsonBody);
-            await fs.WriteAsync(filterBytes, 0, filterBytes.Length, cancel).ConfigureAwait(false);
-
-            await fs.WriteAsync(endFilter, 0, endFilter.Length, cancel).ConfigureAwait(false);
-
-            await fs.WriteAsync(lf2, 0, lf2.Length, cancel).ConfigureAwait(false);
-            await fs.WriteAsync(sep, 0, sep.Length, cancel).ConfigureAwait(false);
-
-            await fs.WriteAsync(rawMail, 0, rawMail.Length, cancel).ConfigureAwait(false);
+            if (enableGzip)
+            {
+                // gzip 圧縮を最大圧縮率で有効化する [251224_BEXKU2]
+                using var gz = new GZipStream(fs, CompressionLevel.SmallestSize, leaveOpen: false);
+                await WriteArchiveContentAsync(gz, bom, lf2, beginMeta, endMeta, beginFilter, endFilter, sep, metaBytes, filterBytes, rawMail, cancel).ConfigureAwait(false);
+            }
+            else
+            {
+                await WriteArchiveContentAsync(fs, bom, lf2, beginMeta, endMeta, beginFilter, endFilter, sep, metaBytes, filterBytes, rawMail, cancel).ConfigureAwait(false);
+            }
         }
 
         long size = new FileInfo(fullPath).Length;
         logger.Info($"Archive saved: {fullPath} (size={size})");
 
         return fullPath;
+    }
+
+    /// <summary>
+    /// アーカイブファイルの内容を書き込みます。
+    /// </summary>
+    /// <param name="stream">書き込み先ストリームです。</param>
+    /// <param name="bom">UTF-8 BOM です。</param>
+    /// <param name="lf2">2 行改行データです。</param>
+    /// <param name="beginMeta">MailMetaData の開始マーカーです。</param>
+    /// <param name="endMeta">MailMetaData の終了マーカーです。</param>
+    /// <param name="beginFilter">MailForwardFilterResult の開始マーカーです。</param>
+    /// <param name="endFilter">MailForwardFilterResult の終了マーカーです。</param>
+    /// <param name="sep">区切り線です。</param>
+    /// <param name="metaBytes">MailMetaData の JSON バイト列です。</param>
+    /// <param name="filterBytes">MailForwardFilterResult の JSON バイト列です。</param>
+    /// <param name="rawMail">生メールのバイト列です。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    /// <returns>非同期タスクです。</returns>
+    private static async Task WriteArchiveContentAsync(Stream stream, byte[] bom, byte[] lf2, byte[] beginMeta, byte[] endMeta, byte[] beginFilter, byte[] endFilter, byte[] sep, byte[] metaBytes, byte[] filterBytes, byte[] rawMail, CancellationToken cancel)
+    {
+        if (stream == null) throw new ArgumentNullException(nameof(stream));
+        if (bom == null) throw new ArgumentNullException(nameof(bom));
+        if (lf2 == null) throw new ArgumentNullException(nameof(lf2));
+        if (beginMeta == null) throw new ArgumentNullException(nameof(beginMeta));
+        if (endMeta == null) throw new ArgumentNullException(nameof(endMeta));
+        if (beginFilter == null) throw new ArgumentNullException(nameof(beginFilter));
+        if (endFilter == null) throw new ArgumentNullException(nameof(endFilter));
+        if (sep == null) throw new ArgumentNullException(nameof(sep));
+        if (metaBytes == null) throw new ArgumentNullException(nameof(metaBytes));
+        if (filterBytes == null) throw new ArgumentNullException(nameof(filterBytes));
+        if (rawMail == null) throw new ArgumentNullException(nameof(rawMail));
+
+        await stream.WriteAsync(bom, 0, bom.Length, cancel).ConfigureAwait(false);
+        await stream.WriteAsync(lf2, 0, lf2.Length, cancel).ConfigureAwait(false);
+
+        await stream.WriteAsync(beginMeta, 0, beginMeta.Length, cancel).ConfigureAwait(false);
+        await stream.WriteAsync(metaBytes, 0, metaBytes.Length, cancel).ConfigureAwait(false);
+        await stream.WriteAsync(endMeta, 0, endMeta.Length, cancel).ConfigureAwait(false);
+
+        await stream.WriteAsync(lf2, 0, lf2.Length, cancel).ConfigureAwait(false);
+
+        await stream.WriteAsync(beginFilter, 0, beginFilter.Length, cancel).ConfigureAwait(false);
+        await stream.WriteAsync(filterBytes, 0, filterBytes.Length, cancel).ConfigureAwait(false);
+        await stream.WriteAsync(endFilter, 0, endFilter.Length, cancel).ConfigureAwait(false);
+
+        await stream.WriteAsync(lf2, 0, lf2.Length, cancel).ConfigureAwait(false);
+        await stream.WriteAsync(sep, 0, sep.Length, cancel).ConfigureAwait(false);
+
+        await stream.WriteAsync(rawMail, 0, rawMail.Length, cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -2785,6 +2828,7 @@ public static class FeatureForward
         cfg.Generic = new GenericConfig
         {
             ArchiveDir = ResolveConfigPath(configDir, GetRequiredString(model, "generic", "archive_dir")),
+            ArchiveEnableGzip = GetOptionalBool(model, "generic", "archive_enable_gzip", false),
             LogDir = ResolveConfigPath(configDir, GetRequiredString(model, "generic", "log_dir")),
         };
 
@@ -3046,6 +3090,38 @@ public static class FeatureForward
     }
 
     /// <summary>
+    /// TOML の任意 bool フィールドを取得します。(無い場合は既定値を返します)
+    /// </summary>
+    /// <param name="root">ルートテーブルです。</param>
+    /// <param name="tableName">テーブル名です。</param>
+    /// <param name="key">キー名です。</param>
+    /// <param name="defaultValue">既定値です。</param>
+    /// <returns>bool 値です。</returns>
+    private static bool GetOptionalBool(TomlTable root, string tableName, string key, bool defaultValue)
+    {
+        if (root == null) throw new ArgumentNullException(nameof(root));
+        if (tableName == null) throw new ArgumentNullException(nameof(tableName));
+        if (key == null) throw new ArgumentNullException(nameof(key));
+
+        if (root.TryGetValue(tableName, out object? tableObj) == false || tableObj is TomlTable table == false)
+        {
+            return defaultValue;
+        }
+
+        if (table.TryGetValue(key, out object? valueObj) == false || valueObj == null)
+        {
+            return defaultValue;
+        }
+
+        if (valueObj is bool b)
+        {
+            return b;
+        }
+
+        throw new Exception($"APPERROR: TOML value type must be bool: {tableName}.{key}");
+    }
+
+    /// <summary>
     /// TOML の必須 int フィールドを取得します。
     /// </summary>
     /// <param name="root">ルートテーブルです。</param>
@@ -3168,6 +3244,11 @@ public static class FeatureForward
         /// アーカイブディレクトリです。(フルパス)
         /// </summary>
         public string ArchiveDir = "";
+
+        /// <summary>
+        /// アーカイブ保存時に gzip 圧縮を有効にするかどうかです。
+        /// </summary>
+        public bool ArchiveEnableGzip;
 
         /// <summary>
         /// ログディレクトリです。(フルパス)

@@ -134,4 +134,6 @@ Gmail の「フィルタ」の現在設定を filter.cs にマージする作業
         -- shouldMarkAsRead が付いていれば、result.MarkAsRead = true にする。
         -- label が付いていれば、result.LabelList.Add する。
 
+251224_BFFPY2:
+アーカイブにおける gzip 圧縮機能 [251224_BEXKU2] を実装せよ。
 
