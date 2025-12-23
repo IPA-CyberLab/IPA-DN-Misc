@@ -149,4 +149,30 @@ public static class LibCommon
     }
 }
 
+/// <summary>
+/// メール転送の統計情報データです。[251224_CKJBE4]
+/// </summary>
+public class LibMailFwdStatInfo
+{
+    /// <summary>
+    /// 最後に転送処理が成功した日時です。(ローカルタイムゾーン) [251224_CKS4SV]
+    /// </summary>
+    public DateTimeOffset LastRunOkDt;
+
+    /// <summary>
+    /// これまで転送処理 (転送に成功) したメール数です。
+    /// </summary>
+    public long NumMails;
+
+    /// <summary>
+    /// これまで発生したエラー数です。
+    /// </summary>
+    public long NumErrors;
+
+    /// <summary>
+    /// これまで転送処理 (転送に成功) したメールサイズ合計 (バイト) です。
+    /// </summary>
+    public long TotalMailSize;
+}
+
 #endif

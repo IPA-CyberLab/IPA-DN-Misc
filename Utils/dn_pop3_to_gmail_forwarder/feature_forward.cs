@@ -357,6 +357,13 @@ public static class FeatureForward
                 await pop3.DeleteMessageAsync(messageNo, cancel).ConfigureAwait(false);
                 logger.Info(BuildMailMetaSummary("POP3 DELE completed", meta));
 
+                // 統計情報記録と自動 tar アーカイブ [251224_CKS4SV]
+                bool isFirstToday = await UpdateStatInfoAsync(config, meta, logger, DateTimeOffset.Now, cancel).ConfigureAwait(false);
+                if (isFirstToday && config.Generic.ArchiveEnableTar)
+                {
+                    await RunAutoTarArchiveAsync(config, logger, cancel).ConfigureAwait(false);
+                }
+
                 totalProcessed++;
             }
 
@@ -1304,6 +1311,652 @@ public static class FeatureForward
         logger.Info($"Archive saved: {fullPath} (size={size})");
 
         return fullPath;
+    }
+
+    /// <summary>
+    /// 統計情報を更新し、本日初回かどうかを返します。[251224_CJU4PT][251224_CKS4SV]
+    /// </summary>
+    /// <param name="config">設定です。</param>
+    /// <param name="meta">メタデータです。</param>
+    /// <param name="logger">ロガーです。</param>
+    /// <param name="now">現在時刻です。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    /// <returns>本日初回の場合は true です。</returns>
+    private static async Task<bool> UpdateStatInfoAsync(ForwardConfig config, MailMetaData meta, ForwardLogger logger, DateTimeOffset now, CancellationToken cancel)
+    {
+        if (config == null) throw new ArgumentNullException(nameof(config));
+        if (meta == null) throw new ArgumentNullException(nameof(meta));
+        if (logger == null) throw new ArgumentNullException(nameof(logger));
+
+        string statPath = config.Generic.StatFileName;
+
+        LibMailFwdStatInfo stat = new LibMailFwdStatInfo();
+        bool loaded = false;
+
+        if (File.Exists(statPath))
+        {
+            try
+            {
+                stat = await LibCommon.ReadSingleJsonFileAsync<LibMailFwdStatInfo>(statPath, cancel).ConfigureAwait(false);
+                loaded = true;
+            }
+            catch (Exception ex)
+            {
+                logger.Error(LibCommon.AppendExceptionDetail($"APPERROR: Failed to read stat file: {statPath}", ex));
+                stat = new LibMailFwdStatInfo();
+            }
+        }
+
+        DateTimeOffset nowLocal = now.ToLocalTime();
+        DateTime today = nowLocal.Date;
+
+        bool isFirstToday = true;
+        if (loaded)
+        {
+            DateTime lastLocalDate = stat.LastRunOkDt.ToLocalTime().Date;
+            isFirstToday = lastLocalDate < today;
+        }
+
+        long errorDelta = logger.ConsumeErrorCount();
+
+        stat.LastRunOkDt = nowLocal;
+        stat.NumMails += 1;
+        stat.NumErrors += errorDelta;
+        stat.TotalMailSize += meta.MailSize;
+
+        JsonSerializerSettings compactSettings = LibCommon.CreateStandardJsonSerializerSettings();
+        compactSettings.Formatting = Formatting.None;
+        string compactJson = JsonConvert.SerializeObject(stat, compactSettings);
+        logger.Info(compactJson);
+
+        try
+        {
+            await LibCommon.WriteSingleJsonFileByTempAsync(statPath, stat, cancel).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.Error(LibCommon.AppendExceptionDetail($"APPERROR: Failed to write stat file: {statPath}", ex));
+        }
+
+        return isFirstToday;
+    }
+
+    /// <summary>
+    /// 自動 tar アーカイブ機能を実行します。[251224_CCNR2A]
+    /// </summary>
+    /// <param name="config">設定です。</param>
+    /// <param name="logger">ロガーです。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    /// <returns>非同期タスクです。</returns>
+    private static async Task RunAutoTarArchiveAsync(ForwardConfig config, ForwardLogger logger, CancellationToken cancel)
+    {
+        if (config == null) throw new ArgumentNullException(nameof(config));
+        if (logger == null) throw new ArgumentNullException(nameof(logger));
+
+        if (config.Generic.ArchiveEnableTar == false)
+        {
+            return;
+        }
+
+        string archiveDir = config.Generic.ArchiveDir;
+        if (Directory.Exists(archiveDir) == false)
+        {
+            return;
+        }
+
+        DateTime today = DateTime.Now.Date;
+        int passDays = config.Generic.ArchiveEnableTarPassDays;
+
+        var targets = new List<(DateTime Date, string DirPath, string DirName)>();
+
+        foreach (string dir in Directory.GetDirectories(archiveDir))
+        {
+            string name = Path.GetFileName(dir);
+            if (TryParseArchiveDateDirName(name, out DateTime date) == false)
+            {
+                continue;
+            }
+
+            if (date > today)
+            {
+                continue;
+            }
+
+            int daysPassed = (today - date).Days;
+            if (daysPassed < passDays)
+            {
+                continue;
+            }
+
+            targets.Add((date, dir, name));
+        }
+
+        targets.Sort((a, b) => a.Date.CompareTo(b.Date));
+
+        foreach (var target in targets)
+        {
+            cancel.ThrowIfCancellationRequested();
+
+            try
+            {
+                await ProcessTarArchiveDirectoryAsync(target.DirPath, target.DirName, logger, cancel).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.Error(LibCommon.AppendExceptionDetail($"APPERROR: Auto tar archive failed. dir={target.DirPath}", ex));
+            }
+        }
+    }
+
+    /// <summary>
+    /// tar 化対象ディレクトリを処理します。[251224_CCNR2A]
+    /// </summary>
+    /// <param name="dirPath">対象ディレクトリパスです。</param>
+    /// <param name="dirName">対象ディレクトリ名 (YYYYMMDD) です。</param>
+    /// <param name="logger">ロガーです。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    /// <returns>非同期タスクです。</returns>
+    private static async Task ProcessTarArchiveDirectoryAsync(string dirPath, string dirName, ForwardLogger logger, CancellationToken cancel)
+    {
+        if (dirPath == null) throw new ArgumentNullException(nameof(dirPath));
+        if (dirName == null) throw new ArgumentNullException(nameof(dirName));
+        if (logger == null) throw new ArgumentNullException(nameof(logger));
+
+        List<FileInfo> files = new List<FileInfo>();
+        foreach (string path in Directory.GetFiles(dirPath, "*.txt"))
+        {
+            files.Add(new FileInfo(path));
+        }
+        foreach (string path in Directory.GetFiles(dirPath, "*.txt.gz"))
+        {
+            files.Add(new FileInfo(path));
+        }
+
+        if (files.Count <= 0)
+        {
+            return;
+        }
+
+        files.Sort((a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
+
+        string tarPath = Path.Combine(dirPath, dirName + ".tar");
+        HashSet<string> existingNames = new HashSet<string>(StringComparer.Ordinal);
+        long appendOffset = 0;
+
+        if (File.Exists(tarPath))
+        {
+            TarScanResult scan = ScanTarArchive(tarPath);
+            existingNames = scan.EntryNames;
+            appendOffset = scan.AppendOffset;
+        }
+
+        var appendFiles = new List<FileInfo>();
+        var nameSet = new HashSet<string>(existingNames, StringComparer.Ordinal);
+
+        foreach (FileInfo fi in files)
+        {
+            string name = fi.Name;
+            if (nameSet.Contains(name))
+            {
+                logger.Error($"APPERROR: Auto tar archive duplicate file name. dir={dirPath}, file={name}, tar={tarPath}");
+                continue;
+            }
+
+            appendFiles.Add(fi);
+            nameSet.Add(name);
+        }
+
+        if (appendFiles.Count <= 0)
+        {
+            return;
+        }
+
+        TarAppendResult appendResult = await AppendFilesToTarAsync(tarPath, appendOffset, appendFiles, cancel).ConfigureAwait(false);
+        if (appendResult.Success == false)
+        {
+            string fileInfo = string.IsNullOrEmpty(appendResult.FailedFileName) ? "" : $", file={appendResult.FailedFileName}";
+            if (appendResult.Exception != null)
+            {
+                logger.Error(LibCommon.AppendExceptionDetail($"APPERROR: Auto tar archive failed. dir={dirPath}, tar={tarPath}{fileInfo}", appendResult.Exception));
+            }
+            else
+            {
+                logger.Error($"APPERROR: Auto tar archive failed. dir={dirPath}, tar={tarPath}{fileInfo}");
+            }
+            return;
+        }
+
+        foreach (FileInfo fi in appendResult.AppendedFiles)
+        {
+            try
+            {
+                File.Delete(fi.FullName);
+            }
+            catch (Exception ex)
+            {
+                logger.Error(LibCommon.AppendExceptionDetail($"APPERROR: Auto tar archive failed to delete file. dir={dirPath}, file={fi.FullName}", ex));
+            }
+        }
+    }
+
+    /// <summary>
+    /// tar 追記処理結果です。
+    /// </summary>
+    private sealed class TarAppendResult
+    {
+        /// <summary>
+        /// 成功したかどうかです。
+        /// </summary>
+        public bool Success;
+
+        /// <summary>
+        /// 追記したファイル一覧です。
+        /// </summary>
+        public List<FileInfo> AppendedFiles = new List<FileInfo>();
+
+        /// <summary>
+        /// 失敗時のファイル名です。
+        /// </summary>
+        public string FailedFileName = "";
+
+        /// <summary>
+        /// 例外です。
+        /// </summary>
+        public Exception? Exception;
+    }
+
+    /// <summary>
+    /// tar ファイルに追記します。[251224_CCNR2A]
+    /// </summary>
+    /// <param name="tarPath">tar ファイルパスです。</param>
+    /// <param name="appendOffset">追記開始オフセットです。</param>
+    /// <param name="files">追記するファイル一覧です。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    /// <returns>処理結果です。</returns>
+    private static async Task<TarAppendResult> AppendFilesToTarAsync(string tarPath, long appendOffset, List<FileInfo> files, CancellationToken cancel)
+    {
+        if (tarPath == null) throw new ArgumentNullException(nameof(tarPath));
+        if (files == null) throw new ArgumentNullException(nameof(files));
+
+        var result = new TarAppendResult();
+
+        using var fs = new FileStream(tarPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        fs.SetLength(appendOffset);
+        fs.Position = appendOffset;
+
+        try
+        {
+            foreach (FileInfo fi in files)
+            {
+                cancel.ThrowIfCancellationRequested();
+
+                result.FailedFileName = fi.Name;
+                await WriteTarEntryAsync(fs, fi, fi.Name, cancel).ConfigureAwait(false);
+                result.AppendedFiles.Add(fi);
+            }
+
+            await WriteTarEndBlocksAsync(fs, cancel).ConfigureAwait(false);
+            result.Success = true;
+            return result;
+        }
+        catch (Exception ex)
+        {
+            result.Success = false;
+            result.Exception = ex;
+
+            // 追記に失敗した場合は、元の終端ブロックに戻す
+            try
+            {
+                fs.SetLength(appendOffset);
+                fs.Position = appendOffset;
+                await WriteTarEndBlocksAsync(fs, cancel).ConfigureAwait(false);
+            }
+            catch
+            {
+                // 復旧失敗は無視 (上位で詳細ログ)
+            }
+
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// tar の 2 つの終端ブロックを書き込みます。
+    /// </summary>
+    /// <param name="stream">書き込み先ストリームです。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    /// <returns>非同期タスクです。</returns>
+    private static async Task WriteTarEndBlocksAsync(Stream stream, CancellationToken cancel)
+    {
+        if (stream == null) throw new ArgumentNullException(nameof(stream));
+
+        byte[] zero = new byte[512];
+        await stream.WriteAsync(zero, 0, zero.Length, cancel).ConfigureAwait(false);
+        await stream.WriteAsync(zero, 0, zero.Length, cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// tar エントリを書き込みます。
+    /// </summary>
+    /// <param name="tarStream">tar ストリームです。</param>
+    /// <param name="file">対象ファイルです。</param>
+    /// <param name="entryName">tar 内のファイル名です。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    /// <returns>非同期タスクです。</returns>
+    private static async Task WriteTarEntryAsync(Stream tarStream, FileInfo file, string entryName, CancellationToken cancel)
+    {
+        if (tarStream == null) throw new ArgumentNullException(nameof(tarStream));
+        if (file == null) throw new ArgumentNullException(nameof(file));
+        if (entryName == null) throw new ArgumentNullException(nameof(entryName));
+
+        byte[] nameBytes = Encoding.UTF8.GetBytes(entryName);
+        DateTimeOffset mtime = new DateTimeOffset(file.LastWriteTimeUtc, TimeSpan.Zero);
+
+        if (nameBytes.Length > 100)
+        {
+            await WriteTarLongNameAsync(tarStream, entryName, mtime, cancel).ConfigureAwait(false);
+        }
+
+        string headerName = entryName;
+        if (nameBytes.Length > 100)
+        {
+            headerName = TruncateUtf8String(entryName, 100);
+        }
+
+        byte[] header = BuildTarHeader(headerName, file.Length, mtime, typeFlag: '0');
+        await tarStream.WriteAsync(header, 0, header.Length, cancel).ConfigureAwait(false);
+
+        await using (var fs = new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            await fs.CopyToAsync(tarStream, 81920, cancel).ConfigureAwait(false);
+        }
+
+        long pad = (512 - (file.Length % 512)) % 512;
+        if (pad > 0)
+        {
+            byte[] padBuf = new byte[pad];
+            await tarStream.WriteAsync(padBuf, 0, padBuf.Length, cancel).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// GNU tar の LongLink エントリを書き込みます。
+    /// </summary>
+    /// <param name="tarStream">tar ストリームです。</param>
+    /// <param name="longName">長いファイル名です。</param>
+    /// <param name="mtime">更新日時です。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    /// <returns>非同期タスクです。</returns>
+    private static async Task WriteTarLongNameAsync(Stream tarStream, string longName, DateTimeOffset mtime, CancellationToken cancel)
+    {
+        if (tarStream == null) throw new ArgumentNullException(nameof(tarStream));
+        if (longName == null) throw new ArgumentNullException(nameof(longName));
+
+        byte[] nameBytes = Encoding.UTF8.GetBytes(longName);
+        long size = nameBytes.Length + 1;
+
+        byte[] header = BuildTarHeader("././@LongLink", size, mtime, typeFlag: 'L');
+        await tarStream.WriteAsync(header, 0, header.Length, cancel).ConfigureAwait(false);
+
+        await tarStream.WriteAsync(nameBytes, 0, nameBytes.Length, cancel).ConfigureAwait(false);
+        await tarStream.WriteAsync(new byte[] { 0x00 }, 0, 1, cancel).ConfigureAwait(false);
+
+        long pad = (512 - (size % 512)) % 512;
+        if (pad > 0)
+        {
+            byte[] padBuf = new byte[pad];
+            await tarStream.WriteAsync(padBuf, 0, padBuf.Length, cancel).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// tar ヘッダを作成します。
+    /// </summary>
+    /// <param name="name">ファイル名です。</param>
+    /// <param name="size">ファイルサイズです。</param>
+    /// <param name="mtime">更新日時です。</param>
+    /// <param name="typeFlag">type フラグです。</param>
+    /// <returns>tar ヘッダ (512 bytes) です。</returns>
+    private static byte[] BuildTarHeader(string name, long size, DateTimeOffset mtime, char typeFlag)
+    {
+        if (name == null) throw new ArgumentNullException(nameof(name));
+
+        byte[] header = new byte[512];
+
+        WriteTarString(header, 0, 100, name);
+        WriteTarOctal(header, 100, 8, 0_000777);
+        WriteTarOctal(header, 108, 8, 0);
+        WriteTarOctal(header, 116, 8, 0);
+        WriteTarOctal(header, 124, 12, size);
+
+        long unixTime = mtime.ToUnixTimeSeconds();
+        if (unixTime < 0) unixTime = 0;
+        WriteTarOctal(header, 136, 12, unixTime);
+
+        for (int i = 148; i < 156; i++) header[i] = 0x20; // チェックサム計算時は空白
+
+        header[156] = (byte)typeFlag;
+
+        WriteTarString(header, 257, 6, "ustar");
+        WriteTarString(header, 263, 2, "00");
+
+        long sum = 0;
+        foreach (byte b in header)
+        {
+            sum += b;
+        }
+
+        WriteTarChecksum(header, sum);
+
+        return header;
+    }
+
+    /// <summary>
+    /// tar ファイル内の既存エントリ名と追記位置を取得します。
+    /// </summary>
+    /// <param name="tarPath">tar ファイルパスです。</param>
+    /// <returns>スキャン結果です。</returns>
+    private static TarScanResult ScanTarArchive(string tarPath)
+    {
+        if (tarPath == null) throw new ArgumentNullException(nameof(tarPath));
+
+        var result = new TarScanResult();
+
+        using var fs = new FileStream(tarPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        byte[] header = new byte[512];
+        string pendingLongName = "";
+
+        while (true)
+        {
+            long headerPos = fs.Position;
+            if (ReadExactlyOrEof(fs, header, 0, header.Length) == false)
+            {
+                result.AppendOffset = fs.Position;
+                return result;
+            }
+
+            if (IsAllZero(header))
+            {
+                result.AppendOffset = headerPos;
+                return result;
+            }
+
+            char typeFlag = (char)header[156];
+            if (typeFlag == 'L')
+            {
+                long size = ParseTarOctal(header, 124, 12);
+                byte[] longNameBytes = ReadTarDataBytes(fs, size);
+                pendingLongName = Encoding.UTF8.GetString(longNameBytes).TrimEnd('\0');
+
+                long skip = ((size + 511) / 512) * 512 - size;
+                if (skip > 0) SkipExactly(fs, skip);
+                continue;
+            }
+
+            string name;
+            if (string.IsNullOrEmpty(pendingLongName) == false)
+            {
+                name = pendingLongName;
+                pendingLongName = "";
+            }
+            else
+            {
+                name = ReadNullTerminatedAscii(header, 0, 100);
+                string prefix = ReadNullTerminatedAscii(header, 345, 155);
+                if (string.IsNullOrEmpty(prefix) == false)
+                {
+                    name = prefix + "/" + name;
+                }
+            }
+
+            if (string.IsNullOrEmpty(name) == false)
+            {
+                result.EntryNames.Add(name);
+            }
+
+            long dataSize = ParseTarOctal(header, 124, 12);
+            long skipData = ((dataSize + 511) / 512) * 512;
+            if (skipData > 0) SkipExactly(fs, skipData);
+        }
+    }
+
+    /// <summary>
+    /// tar データ部を読み取ります。
+    /// </summary>
+    /// <param name="stream">入力ストリームです。</param>
+    /// <param name="size">読み取るサイズです。</param>
+    /// <returns>読み取ったバイト配列です。</returns>
+    private static byte[] ReadTarDataBytes(Stream stream, long size)
+    {
+        if (stream == null) throw new ArgumentNullException(nameof(stream));
+        if (size < 0 || size > int.MaxValue) throw new Exception("APPERROR: tar entry size is invalid.");
+
+        int len = (int)size;
+        byte[] buf = new byte[len];
+        int total = 0;
+        while (total < len)
+        {
+            int r = stream.Read(buf, total, len - total);
+            if (r <= 0)
+            {
+                throw new EndOfStreamException("APPERROR: Unexpected end of tar stream.");
+            }
+            total += r;
+        }
+        return buf;
+    }
+
+    /// <summary>
+    /// tar スキャン結果です。
+    /// </summary>
+    private sealed class TarScanResult
+    {
+        /// <summary>
+        /// tar 内の既存エントリ名一覧です。
+        /// </summary>
+        public HashSet<string> EntryNames = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// 追記開始オフセットです。
+        /// </summary>
+        public long AppendOffset;
+    }
+
+    /// <summary>
+    /// YYYYMMDD 形式のディレクトリ名をパースします。
+    /// </summary>
+    /// <param name="dirName">ディレクトリ名です。</param>
+    /// <param name="date">パース結果の日付です。</param>
+    /// <returns>パースできた場合は true です。</returns>
+    private static bool TryParseArchiveDateDirName(string dirName, out DateTime date)
+    {
+        date = default;
+        if (string.IsNullOrWhiteSpace(dirName)) return false;
+
+        return DateTime.TryParseExact(dirName, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+    }
+
+    /// <summary>
+    /// tar 用の文字列を ASCII で書き込みます。
+    /// </summary>
+    /// <param name="buf">バッファです。</param>
+    /// <param name="offset">書き込み開始位置です。</param>
+    /// <param name="len">最大長です。</param>
+    /// <param name="value">書き込む文字列です。</param>
+    private static void WriteTarString(byte[] buf, int offset, int len, string value)
+    {
+        if (buf == null) throw new ArgumentNullException(nameof(buf));
+        if (value == null) value = "";
+
+        byte[] src = Encoding.ASCII.GetBytes(value);
+        int copyLen = Math.Min(len, src.Length);
+        Array.Copy(src, 0, buf, offset, copyLen);
+    }
+
+    /// <summary>
+    /// tar 用の 8 進数フィールドを書き込みます。
+    /// </summary>
+    /// <param name="buf">バッファです。</param>
+    /// <param name="offset">書き込み開始位置です。</param>
+    /// <param name="len">長さです。</param>
+    /// <param name="value">値です。</param>
+    private static void WriteTarOctal(byte[] buf, int offset, int len, long value)
+    {
+        if (buf == null) throw new ArgumentNullException(nameof(buf));
+        if (len <= 0) return;
+
+        string oct = Convert.ToString(value, 8);
+        if (oct.Length > len - 1)
+        {
+            throw new Exception("APPERROR: tar octal field overflow.");
+        }
+
+        string s = oct.PadLeft(len - 1, '0');
+        byte[] src = Encoding.ASCII.GetBytes(s);
+        Array.Copy(src, 0, buf, offset, src.Length);
+        buf[offset + len - 1] = 0;
+    }
+
+    /// <summary>
+    /// tar 用のチェックサムフィールドを書き込みます。
+    /// </summary>
+    /// <param name="buf">バッファです。</param>
+    /// <param name="checksum">チェックサム値です。</param>
+    private static void WriteTarChecksum(byte[] buf, long checksum)
+    {
+        if (buf == null) throw new ArgumentNullException(nameof(buf));
+
+        string oct = Convert.ToString(checksum, 8);
+        oct = oct.PadLeft(6, '0');
+        byte[] src = Encoding.ASCII.GetBytes(oct);
+        Array.Copy(src, 0, buf, 148, src.Length);
+        buf[148 + 6] = 0;
+        buf[148 + 7] = (byte)' ';
+    }
+
+    /// <summary>
+    /// UTF-8 文字列を指定バイト数で切り詰めます。
+    /// </summary>
+    /// <param name="text">入力文字列です。</param>
+    /// <param name="maxBytes">最大バイト数です。</param>
+    /// <returns>切り詰め後の文字列です。</returns>
+    private static string TruncateUtf8String(string text, int maxBytes)
+    {
+        if (text == null) throw new ArgumentNullException(nameof(text));
+        if (maxBytes <= 0) return "";
+
+        byte[] bytes = Encoding.UTF8.GetBytes(text);
+        if (bytes.Length <= maxBytes) return text;
+
+        int cut = maxBytes;
+        while (cut > 0 && (bytes[cut - 1] & 0xC0) == 0x80)
+        {
+            cut--;
+        }
+
+        if (cut <= 0) return "";
+
+        return Encoding.UTF8.GetString(bytes, 0, cut);
     }
 
     /// <summary>
@@ -2829,7 +3482,10 @@ public static class FeatureForward
         {
             ArchiveDir = ResolveConfigPath(configDir, GetRequiredString(model, "generic", "archive_dir")),
             ArchiveEnableGzip = GetOptionalBool(model, "generic", "archive_enable_gzip", false),
+            ArchiveEnableTar = GetOptionalBool(model, "generic", "archive_enable_tar", false),
+            ArchiveEnableTarPassDays = GetOptionalInt(model, "generic", "archive_enable_tar_pass_days", 1, 0, int.MaxValue),
             LogDir = ResolveConfigPath(configDir, GetRequiredString(model, "generic", "log_dir")),
+            StatFileName = ResolveConfigPath(configDir, GetRequiredString(model, "generic", "stat_filename")),
         };
 
         // pop3
@@ -3122,6 +3778,54 @@ public static class FeatureForward
     }
 
     /// <summary>
+    /// TOML の任意 int フィールドを取得します。(無い場合は既定値を返します)
+    /// </summary>
+    /// <param name="root">ルートテーブルです。</param>
+    /// <param name="tableName">テーブル名です。</param>
+    /// <param name="key">キー名です。</param>
+    /// <param name="defaultValue">既定値です。</param>
+    /// <param name="min">最小値です。</param>
+    /// <param name="max">最大値です。</param>
+    /// <returns>int 値です。</returns>
+    private static int GetOptionalInt(TomlTable root, string tableName, string key, int defaultValue, int min, int max)
+    {
+        if (root == null) throw new ArgumentNullException(nameof(root));
+        if (tableName == null) throw new ArgumentNullException(nameof(tableName));
+        if (key == null) throw new ArgumentNullException(nameof(key));
+
+        if (root.TryGetValue(tableName, out object? tableObj) == false || tableObj is TomlTable table == false)
+        {
+            return defaultValue;
+        }
+
+        if (table.TryGetValue(key, out object? valueObj) == false || valueObj == null)
+        {
+            return defaultValue;
+        }
+
+        long n;
+        if (valueObj is long l)
+        {
+            n = l;
+        }
+        else if (valueObj is int i)
+        {
+            n = i;
+        }
+        else
+        {
+            throw new Exception($"APPERROR: TOML value type must be integer: {tableName}.{key}");
+        }
+
+        if (n < min || n > max)
+        {
+            throw new Exception($"APPERROR: TOML integer out of range ({min}..{max}): {tableName}.{key} = {n}");
+        }
+
+        return (int)n;
+    }
+
+    /// <summary>
     /// TOML の必須 int フィールドを取得します。
     /// </summary>
     /// <param name="root">ルートテーブルです。</param>
@@ -3251,9 +3955,24 @@ public static class FeatureForward
         public bool ArchiveEnableGzip;
 
         /// <summary>
+        /// アーカイブディレクトリの自動 tar 化を有効にするかどうかです。
+        /// </summary>
+        public bool ArchiveEnableTar;
+
+        /// <summary>
+        /// 自動 tar 化の経過日数条件です。
+        /// </summary>
+        public int ArchiveEnableTarPassDays;
+
+        /// <summary>
         /// ログディレクトリです。(フルパス)
         /// </summary>
         public string LogDir = "";
+
+        /// <summary>
+        /// 統計情報ファイル名です。(フルパス)
+        /// </summary>
+        public string StatFileName = "";
     }
 
     /// <summary>
@@ -3416,6 +4135,7 @@ public static class FeatureForward
     private sealed class ForwardLogger
     {
         private readonly string _logDir;
+        private long _errorCount;
 
         /// <summary>
         /// コンストラクタです。
@@ -3446,6 +4166,15 @@ public static class FeatureForward
         }
 
         /// <summary>
+        /// 統計用のエラー件数を取得し、カウントをリセットします。
+        /// </summary>
+        /// <returns>リセット前のエラー件数です。</returns>
+        public long ConsumeErrorCount()
+        {
+            return Interlocked.Exchange(ref _errorCount, 0);
+        }
+
+        /// <summary>
         /// Error を標準エラー出力のみに出力します。(ログ保存なし)
         /// </summary>
         /// <param name="message">メッセージです。</param>
@@ -3458,6 +4187,11 @@ public static class FeatureForward
         private void Write(string type, string message, bool isError)
         {
             string line = BuildLogLine(type, message);
+
+            if (isError)
+            {
+                Interlocked.Increment(ref _errorCount);
+            }
 
             // まずコンソールへ (仕様: Info は stdout, Error は stderr)
             try

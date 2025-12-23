@@ -20,6 +20,30 @@ dotnet build を実行し、コンパイル成功を確認した。
 
 
 ===================================================================
+日時: 2025/12/24 03:00:11 JST
+開発者によって指示された指示の内容: 251224_CSX3SZ 統計記録と自動 tar アーカイブの実装
+作業内容の概要: 統計 JSON 更新と 1 日 1 回の tar 結合処理を追加
+AI エンジン: GPT-5 (Codex CLI) 推論レベル: 標準
+AI 実行コンピュータ名: pc34
+関連タグ: 251224_CSX3SZ, 251224_CKS4SV, 251224_CJU4PT, 251224_CCNR2A, 251224_CKJBE4
+編集したファイルの一覧: feature_forward.cs, lib_common.cs
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): FeatureForward.RunForwardInternalAsync, FeatureForward.UpdateStatInfoAsync, FeatureForward.RunAutoTarArchiveAsync, FeatureForward.ProcessTarArchiveDirectoryAsync, FeatureForward.AppendFilesToTarAsync, FeatureForward.WriteTarEntryAsync, FeatureForward.ScanTarArchive, FeatureForward.ForwardLogger.ConsumeErrorCount, LibMailFwdStatInfo
+実装において迷った点 (もしあれば): tar 追記失敗時のロールバックと削除タイミング、エラー件数の集計タイミング。
+参考文献 (複数あってよい): なし
+
+
+POP3 の削除完了後に統計情報記録機能を実行し、LastRunOkDt/NumMails/NumErrors/TotalMailSize を更新する処理を追加した。
+統計 JSON は既存ファイルの読み取りに失敗した場合は Error ログを出して新規作成とし、書き込み前に
+改行なしの JSON を Info ログとして出力するようにした。統計ファイルは BOM 付き UTF-8 とした。
+さらに「本日初めて」の判定に基づき、archive_enable_tar=true の場合のみ自動 tar アーカイブ機能を
+実行するようにし、YYYYMMDD ディレクトリ配下の .txt/.txt.gz をファイル名順で tar に結合する処理を実装した。
+既存 tar への追記では重複ファイル名の検出とエラー記録を行い、長いファイル名には GNU LongLink を用いた。
+generic セクションに stat_filename / archive_enable_tar / archive_enable_tar_pass_days の読み取りを追加し、
+ForwardLogger にエラーカウントの取得・リセット機能を実装した。
+dotnet build を実行し、コンパイル成功を確認した。
+
+
+===================================================================
 日時: 2025/12/24 01:34:59 JST
 開発者によって指示された指示の内容: 251224_BPM9EB YYMMDD を YYYYMMDD に変更
 作業内容の概要: アーカイブとログファイル名の日時フォーマットを YYYYMMDD に統一
@@ -35,4 +59,3 @@ AI 実行コンピュータ名: pc34
 アーカイブ保存時のディレクトリ名とファイル名を、YYMMDD から YYYYMMDD へ変更した。
 また、ログ保存ファイル名を YYYYMMDD.log に変更し、仕様 [251224_BPAZU4] と整合させた。
 dotnet build を実行し、コンパイル成功を確認した。
-
