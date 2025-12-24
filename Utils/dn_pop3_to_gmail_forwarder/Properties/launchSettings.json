@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "dn_pop3_to_gmail_forwarder": {
+      "commandName": "Project",
+      "commandLineArgs": "forward --config ../../../secret_config.txt"
+    }
+  }
+}
