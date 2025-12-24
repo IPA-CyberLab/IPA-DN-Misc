@@ -18,6 +18,27 @@ gzip 有効時は GZipStream(CompressionLevel.SmallestSize) を経由して最�
 GenericConfig に ArchiveEnableGzip を追加し、TOML 任意 bool 取得用に GetOptionalBool を実装した。
 dotnet build を実行し、コンパイル成功を確認した。
 
+===================================================================
+日時: 2025/12/24 20:29:23 JST
+開発者によって指示された指示の内容: 251224_WLYAY9 の実装 (help モード追加)
+作業内容の概要: help コマンドで --help 相当の表示と終了コード 0 を実現
+AI エンジン: GPT-5 (Codex CLI) 推論レベル: 高
+AI 実行コンピュータ名: pc34
+関連タグ: 251224_WLYAY9, 251224_WLXFR6
+編集したファイルの一覧: dn_pop3_to_gmail_forwarder.cs
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): Program.BuildRootCommand
+実装において迷った点 (もしあれば): 特になし
+参考文献 (複数あってよい): なし
+
+
+ヘルプ表示モード [251224_WLXFR6] に対応するため、ルートコマンドに help サブコマンドを追加した。
+help 実行時は root の --help と同じ表示になるよう、root.InvokeAsync("--help") を呼び出し、
+明示的に終了コード 0 を設定した。
+
+ビルド手順は .vscode/tasks.json の build に従い、dotnet build を実行して成功を確認した。
+
+
+
 
 ===================================================================
 日時: 2025/12/24 19:32:28 JST

@@ -95,6 +95,13 @@ public class Program
     {
         var root = new RootCommand("dn_pop3_to_gmail_forwarder: import POP3 mailbox messages into Gmail (via Gmail API).");
 
+        var helpCommand = new Command("help", "Show help message.");
+        helpCommand.SetHandler(async (InvocationContext context) =>
+        {
+            await root.InvokeAsync(new[] { "--help" }).ConfigureAwait(false);
+            context.ExitCode = 0;
+        });
+
         var getTokenCommand = new Command("gettoken", "Get Gmail OAuth token JSON (desktop/native app loopback flow).");
 
         var saveAsOption = new Option<string>("--saveas", "Output token JSON file path.") { IsRequired = true };
@@ -142,6 +149,7 @@ public class Program
             context.ExitCode = await FeatureForward.RunAsync(options).ConfigureAwait(false);
         });
 
+        root.AddCommand(helpCommand);
         root.AddCommand(getTokenCommand);
         root.AddCommand(forwardCommand);
 
