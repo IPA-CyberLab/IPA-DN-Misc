@@ -22,6 +22,7 @@ using System.Net.Mail;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -64,12 +65,16 @@ public static class FeatureForward
         if (options == null) throw new ArgumentNullException(nameof(options));
 
         ForwardLogger? logger = null;
+        Mutex? singleInstanceMutex = null;
 
         try
         {
             ValidateOptions(options);
 
-            ForwardConfig config = await LoadConfigAsync(options.ConfigPath, cancel).ConfigureAwait(false);
+            string configFullPath = Path.GetFullPath(options.ConfigPath);
+            singleInstanceMutex = AcquireForwardMutexOrThrow(configFullPath);
+
+            ForwardConfig config = await LoadConfigAsync(configFullPath, cancel).ConfigureAwait(false);
 
             logger = new ForwardLogger(config.Generic.LogDir);
 
@@ -113,6 +118,14 @@ public static class FeatureForward
             }
 
             return 1;
+        }
+        finally
+        {
+            if (singleInstanceMutex != null)
+            {
+                try { singleInstanceMutex.ReleaseMutex(); } catch { }
+                try { singleInstanceMutex.Dispose(); } catch { }
+            }
         }
     }
 
@@ -160,6 +173,67 @@ public static class FeatureForward
         if (string.IsNullOrWhiteSpace(options.ConfigPath))
         {
             throw new Exception("APPERROR: --config is required.");
+        }
+    }
+
+    /// <summary>
+    /// forward の多重起動防止のためのグローバル Mutex を取得します。[251224_DDQDE9]
+    /// </summary>
+    /// <param name="configFullPath">設定ファイルのフルパスです。</param>
+    /// <returns>取得した Mutex です。</returns>
+    private static Mutex AcquireForwardMutexOrThrow(string configFullPath)
+    {
+        if (string.IsNullOrWhiteSpace(configFullPath))
+        {
+            throw new Exception("APPERROR: config path is empty.");
+        }
+
+        string normalized = configFullPath.Trim().ToUpperInvariant();
+        string hash = ComputeSha1Hex(Encoding.UTF8.GetBytes(normalized));
+        string mutexName = BuildForwardMutexName(hash);
+
+        bool createdNew;
+        var mutex = new Mutex(initiallyOwned: false, name: mutexName, createdNew: out createdNew);
+
+        bool acquired;
+        try
+        {
+            acquired = mutex.WaitOne(0);
+        }
+        catch (AbandonedMutexException)
+        {
+            // 異常終了で放棄された場合は取得済みとみなす
+            acquired = true;
+        }
+
+        if (acquired == false)
+        {
+            mutex.Dispose();
+            throw new Exception($"APPERROR: Forward mode is already running for this config file: {configFullPath}");
+        }
+
+        return mutex;
+    }
+
+    /// <summary>
+    /// forward の多重起動防止用の Mutex 名を構成します。
+    /// </summary>
+    /// <param name="hash">設定ファイルパスから導出したハッシュです。</param>
+    /// <returns>Mutex 名です。</returns>
+    private static string BuildForwardMutexName(string hash)
+    {
+        if (hash == null) throw new ArgumentNullException(nameof(hash));
+
+        string baseName = $"dn_pop3_to_gmail_forwarder.forward.{hash}";
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            // Windows ではグローバル名前空間を明示する
+            return "Global\\" + baseName;
+        }
+        else
+        {
+            return baseName;
         }
     }
 
