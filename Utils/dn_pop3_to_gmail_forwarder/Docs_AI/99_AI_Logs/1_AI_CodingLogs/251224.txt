@@ -20,6 +20,25 @@ dotnet build を実行し、コンパイル成功を確認した。
 
 
 ===================================================================
+日時: 2025/12/24 19:32:28 JST
+開発者によって指示された指示の内容: 251224_VNJQF4 archive_enable_tar_pass_days の必須チェック強化
+作業内容の概要: archive_enable_tar=true 時の必須パラメータ検証を追加
+AI エンジン: GPT-5 (Codex CLI) 推論レベル: 標準
+AI 実行コンピュータ名: pc34
+関連タグ: 251224_VNJQF4, 251224_VMWE23
+編集したファイルの一覧: feature_forward.cs
+実装または変更したクラスやメソッド名の一覧 (複数あってよい): FeatureForward.LoadConfigAsync, FeatureForward.TryGetOptionalInt
+実装において迷った点 (もしあれば): archive_enable_tar=false 時の pass_days の扱いをどこまで厳格にするか。
+参考文献 (複数あってよい): なし
+
+
+archive_enable_tar が true の場合に archive_enable_tar_pass_days を必須とし、
+1 以上であることを厳格にチェックするようにした。値が未指定の場合や 1 未満の場合は
+APPERROR を投げて設定エラーとして扱う。未指定の検知のため TryGetOptionalInt を追加した。
+dotnet build を実行し、コンパイル成功を確認した。
+
+
+===================================================================
 日時: 2025/12/24 18:46:02 JST
 開発者によって指示された指示の内容: 251224_DDW5RW forward 多重起動防止の実装
 作業内容の概要: 設定ファイルのフルパスに基づくグローバル Mutex を導入

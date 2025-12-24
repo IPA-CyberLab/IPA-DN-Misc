@@ -3552,15 +3552,38 @@ public static class FeatureForward
         };
 
         // generic
+        bool hasTarPassDays = TryGetOptionalInt(model, "generic", "archive_enable_tar_pass_days", out int tarPassDays);
+
         cfg.Generic = new GenericConfig
         {
             ArchiveDir = ResolveConfigPath(configDir, GetRequiredString(model, "generic", "archive_dir")),
             ArchiveEnableGzip = GetOptionalBool(model, "generic", "archive_enable_gzip", false),
             ArchiveEnableTar = GetOptionalBool(model, "generic", "archive_enable_tar", false),
-            ArchiveEnableTarPassDays = GetOptionalInt(model, "generic", "archive_enable_tar_pass_days", 1, 0, int.MaxValue),
+            ArchiveEnableTarPassDays = hasTarPassDays ? tarPassDays : 0,
             LogDir = ResolveConfigPath(configDir, GetRequiredString(model, "generic", "log_dir")),
             StatFileName = ResolveConfigPath(configDir, GetRequiredString(model, "generic", "stat_filename")),
         };
+
+        // archive_enable_tar_pass_days は archive_enable_tar = true の場合必須かつ 1 以上 [251224_VMWE23]
+        if (cfg.Generic.ArchiveEnableTar)
+        {
+            if (hasTarPassDays == false)
+            {
+                throw new Exception("APPERROR: Missing TOML value: generic.archive_enable_tar_pass_days");
+            }
+
+            if (cfg.Generic.ArchiveEnableTarPassDays < 1)
+            {
+                throw new Exception($"APPERROR: TOML integer out of range (1..): generic.archive_enable_tar_pass_days = {cfg.Generic.ArchiveEnableTarPassDays}");
+            }
+        }
+        else
+        {
+            if (hasTarPassDays && cfg.Generic.ArchiveEnableTarPassDays < 0)
+            {
+                throw new Exception($"APPERROR: TOML integer out of range (0..): generic.archive_enable_tar_pass_days = {cfg.Generic.ArchiveEnableTarPassDays}");
+            }
+        }
 
         // pop3
         cfg.Pop3 = new Pop3Config
@@ -3820,6 +3843,55 @@ public static class FeatureForward
     }
 
     /// <summary>
+    /// TOML の任意 int フィールドを取得します。(存在しない場合は false)
+    /// </summary>
+    /// <param name="root">ルートテーブルです。</param>
+    /// <param name="tableName">テーブル名です。</param>
+    /// <param name="key">キー名です。</param>
+    /// <param name="value">取得した値です。</param>
+    /// <returns>存在した場合は true です。</returns>
+    private static bool TryGetOptionalInt(TomlTable root, string tableName, string key, out int value)
+    {
+        if (root == null) throw new ArgumentNullException(nameof(root));
+        if (tableName == null) throw new ArgumentNullException(nameof(tableName));
+        if (key == null) throw new ArgumentNullException(nameof(key));
+
+        value = 0;
+
+        if (root.TryGetValue(tableName, out object? tableObj) == false || tableObj is TomlTable table == false)
+        {
+            return false;
+        }
+
+        if (table.TryGetValue(key, out object? valueObj) == false || valueObj == null)
+        {
+            return false;
+        }
+
+        long n;
+        if (valueObj is long l)
+        {
+            n = l;
+        }
+        else if (valueObj is int i)
+        {
+            n = i;
+        }
+        else
+        {
+            throw new Exception($"APPERROR: TOML value type must be integer: {tableName}.{key}");
+        }
+
+        if (n < int.MinValue || n > int.MaxValue)
+        {
+            throw new Exception($"APPERROR: TOML integer out of range ({int.MinValue}..{int.MaxValue}): {tableName}.{key} = {n}");
+        }
+
+        value = (int)n;
+        return true;
+    }
+
+    /// <summary>
     /// TOML の任意 bool フィールドを取得します。(無い場合は既定値を返します)
     /// </summary>
     /// <param name="root">ルートテーブルです。</param>
@@ -3849,54 +3921,6 @@ public static class FeatureForward
         }
 
         throw new Exception($"APPERROR: TOML value type must be bool: {tableName}.{key}");
-    }
-
-    /// <summary>
-    /// TOML の任意 int フィールドを取得します。(無い場合は既定値を返します)
-    /// </summary>
-    /// <param name="root">ルートテーブルです。</param>
-    /// <param name="tableName">テーブル名です。</param>
-    /// <param name="key">キー名です。</param>
-    /// <param name="defaultValue">既定値です。</param>
-    /// <param name="min">最小値です。</param>
-    /// <param name="max">最大値です。</param>
-    /// <returns>int 値です。</returns>
-    private static int GetOptionalInt(TomlTable root, string tableName, string key, int defaultValue, int min, int max)
-    {
-        if (root == null) throw new ArgumentNullException(nameof(root));
-        if (tableName == null) throw new ArgumentNullException(nameof(tableName));
-        if (key == null) throw new ArgumentNullException(nameof(key));
-
-        if (root.TryGetValue(tableName, out object? tableObj) == false || tableObj is TomlTable table == false)
-        {
-            return defaultValue;
-        }
-
-        if (table.TryGetValue(key, out object? valueObj) == false || valueObj == null)
-        {
-            return defaultValue;
-        }
-
-        long n;
-        if (valueObj is long l)
-        {
-            n = l;
-        }
-        else if (valueObj is int i)
-        {
-            n = i;
-        }
-        else
-        {
-            throw new Exception($"APPERROR: TOML value type must be integer: {tableName}.{key}");
-        }
-
-        if (n < min || n > max)
-        {
-            throw new Exception($"APPERROR: TOML integer out of range ({min}..{max}): {tableName}.{key} = {n}");
-        }
-
-        return (int)n;
     }
 
     /// <summary>

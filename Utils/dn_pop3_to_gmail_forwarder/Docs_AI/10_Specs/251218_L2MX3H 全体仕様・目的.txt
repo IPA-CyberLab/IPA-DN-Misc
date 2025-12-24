@@ -54,10 +54,10 @@ archive_dir = "data/archive/"
 # [任意] アーカイブディレクトリにメールを保存する際に、メール本体を圧縮するか
 archive_enable_gzip = true
 
-# [任意、ただし archive_enable_gzip が true の場合は必須] 一定日数が経過したら、アーカイブディレクトリの過日ディレクトリを tar アーカイブ化してファイル数を削減するか
+# [任意] 一定日数が経過したら、アーカイブディレクトリの過日ディレクトリを tar アーカイブ化してファイル数を削減するか
 archive_enable_tar = true
 
-# [任意] archive_enable_tar = true の場合の、経過日数 (1 の場合: 昨日の年月日ディレクトリから tar 化する。2 の場合: 一昨日の年月日ディレクトリから tar 化する。3 の場合: 一昨日の前日の年月日ディレクトリから tar する。.... というルール)。archive_enable_tar = true の場合は、1 以上の整数でなければならない。
+# [任意、ただし archive_enable_gzip が true の場合は必須] archive_enable_tar = true の場合の、経過日数 (1 の場合: 昨日の年月日ディレクトリから tar 化する。2 の場合: 一昨日の年月日ディレクトリから tar 化する。3 の場合: 一昨日の前日の年月日ディレクトリから tar する。.... というルール)。archive_enable_tar = true の場合は、archive_enable_tar は必須であり、かつ、1 以上の整数でなければならない。[251224_VMWE23]
 archive_enable_tar_pass_days = 1
 
 # [必須] ログディレクトリ (相対パスを指定した場合は、この TOML 設定ファイルが存在するディレクトリからの相対パスとなる)
