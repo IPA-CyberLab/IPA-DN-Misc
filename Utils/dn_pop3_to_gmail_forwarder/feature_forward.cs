@@ -140,6 +140,7 @@ public static class FeatureForward
         ForwardLogger? logger = null;
         string currentLogDir = "";
         bool loopStartLogged = false;
+        bool loopPortTaskStarted = false;
         Mutex? singleInstanceMutex = null;
 
         try
@@ -184,6 +185,16 @@ public static class FeatureForward
                     {
                         logger.Info($"loop mode started. config = {config.ConfigFilePath}");
                         loopStartLogged = true;
+                    }
+
+                    if (loopPortTaskStarted == false)
+                    {
+                        int openPort = config.Generic.LoopModeTcpOpenPort;
+                        if (openPort >= 1)
+                        {
+                            StartLoopModeTcpOpenPortTasksIfNeeded(logger, openPort, cancel);
+                        }
+                        loopPortTaskStarted = true;
                     }
 
                     EnsureLoopCycleStartLog(logger, loopCount, ref cycleStartLogged, ref loopErrorCountReset);
@@ -334,6 +345,203 @@ public static class FeatureForward
             logger.Info($"loop mode cycle started. count={loopCount}");
             startLogged = true;
         }
+    }
+
+    /// <summary>
+    /// loop モードの TCP オープンポート監視タスクを起動します。[251228_TYD2JY]
+    /// </summary>
+    /// <param name="logger">ロガーです。</param>
+    /// <param name="port">待受ポート番号です。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    private static void StartLoopModeTcpOpenPortTasksIfNeeded(ForwardLogger logger, int port, CancellationToken cancel)
+    {
+        if (logger == null) throw new ArgumentNullException(nameof(logger));
+
+        if (port < 1 || port > 65535)
+        {
+            logger.Error($"APPERROR: loop_mode_tcp_open_port is out of range (1..65535): {port}");
+            return;
+        }
+
+        // ★ IPv4 / IPv6 の両方を待受する [251228_TYD2JY]
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await RunLoopModeTcpOpenPortListenerAsync(port, useIpv6: false, logger: logger, cancel: cancel).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                try { logger.Error(LibCommon.AppendExceptionDetail("APPERROR: loop_mode_tcp_open_port IPv4 listener failed.", ex)); } catch { }
+            }
+        });
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await RunLoopModeTcpOpenPortListenerAsync(port, useIpv6: true, logger: logger, cancel: cancel).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                try { logger.Error(LibCommon.AppendExceptionDetail("APPERROR: loop_mode_tcp_open_port IPv6 listener failed.", ex)); } catch { }
+            }
+        });
+    }
+
+    /// <summary>
+    /// loop モードの TCP オープンポート待受を実行します。[251228_TYD2JY]
+    /// </summary>
+    /// <param name="port">待受ポート番号です。</param>
+    /// <param name="useIpv6">IPv6 の待受を行なう場合は true です。</param>
+    /// <param name="logger">ロガーです。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    private static async Task RunLoopModeTcpOpenPortListenerAsync(int port, bool useIpv6, ForwardLogger logger, CancellationToken cancel)
+    {
+        if (logger == null) throw new ArgumentNullException(nameof(logger));
+
+        TcpListener? listener = null;
+        string family = useIpv6 ? "IPv6" : "IPv4";
+
+        try
+        {
+            if (useIpv6)
+            {
+                listener = new TcpListener(IPAddress.IPv6Any, port);
+                try { listener.Server.DualMode = false; } catch { }
+            }
+            else
+            {
+                listener = new TcpListener(IPAddress.Any, port);
+            }
+
+            listener.Start();
+
+            logger.Info($"loop_mode_tcp_open_port listener started. family={family}, port={port}");
+
+            while (true)
+            {
+                cancel.ThrowIfCancellationRequested();
+
+                TcpClient client;
+                try
+                {
+                    client = await listener.AcceptTcpClientAsync().WaitAsync(cancel).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (ObjectDisposedException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    logger.Error(LibCommon.AppendExceptionDetail($"APPERROR: loop_mode_tcp_open_port accept failed. family={family}, port={port}", ex));
+                    await Task.Delay(1000, cancel).ConfigureAwait(false);
+                    continue;
+                }
+
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await HandleLoopModeTcpOpenPortClientAsync(port, client, logger, cancel).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // 終了要求時は黙って終了
+                    }
+                    catch (Exception ex)
+                    {
+                        try { logger.Error(LibCommon.AppendExceptionDetail("APPERROR: loop_mode_tcp_open_port client handler failed.", ex)); } catch { }
+                    }
+                    finally
+                    {
+                        try { client.Dispose(); } catch { }
+                    }
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // 上位の cancel で終了
+        }
+        catch (Exception ex)
+        {
+            logger.Error(LibCommon.AppendExceptionDetail($"APPERROR: loop_mode_tcp_open_port listener failed. family={family}, port={port}", ex));
+        }
+        finally
+        {
+            try { listener?.Stop(); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// loop モード TCP 接続の送信処理を実行します。[251228_TYD2JY]
+    /// </summary>
+    /// <param name="port">待受ポート番号です。</param>
+    /// <param name="client">接続済みクライアントです。</param>
+    /// <param name="logger">ロガーです。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    private static async Task HandleLoopModeTcpOpenPortClientAsync(int port, TcpClient client, ForwardLogger logger, CancellationToken cancel)
+    {
+        if (client == null) throw new ArgumentNullException(nameof(client));
+        if (logger == null) throw new ArgumentNullException(nameof(logger));
+
+        client.ReceiveTimeout = 60 * 1000;
+        client.SendTimeout = 60 * 1000;
+        client.NoDelay = true;
+
+        string remote = BuildLoopModeEndpointText(client.Client.RemoteEndPoint);
+        string local = BuildLoopModeEndpointText(client.Client.LocalEndPoint);
+
+        logger.Info($"loop_mode_tcp_open_port で指定されている {port} ポート宛の TCP 接続があった。接続元 {remote}、接続先 {local}");
+
+        using NetworkStream stream = client.GetStream();
+
+        for (int i = 1; i <= 60; i++)
+        {
+            cancel.ThrowIfCancellationRequested();
+
+            string line = $"TWJX6WAE2THRRP {i.ToString("D3", CultureInfo.InvariantCulture)}\r\n";
+            byte[] data = Encoding.ASCII.GetBytes(line);
+
+            try
+            {
+                await stream.WriteAsync(data, 0, data.Length, cancel).ConfigureAwait(false);
+                await stream.FlushAsync(cancel).ConfigureAwait(false);
+            }
+            catch
+            {
+                break;
+            }
+
+            await Task.Delay(1000, cancel).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// エンドポイントを文字列化します。
+    /// </summary>
+    /// <param name="ep">エンドポイントです。</param>
+    /// <returns>文字列です。</returns>
+    private static string BuildLoopModeEndpointText(EndPoint? ep)
+    {
+        if (ep == null) return "(unknown)";
+
+        if (ep is IPEndPoint ip)
+        {
+            string addr = ip.Address.ToString();
+            if (ip.Address.AddressFamily == AddressFamily.InterNetworkV6)
+            {
+                return $"[{addr}]:{ip.Port}";
+            }
+            return $"{addr}:{ip.Port}";
+        }
+
+        return ep.ToString() ?? "(unknown)";
     }
 
     /// <summary>
@@ -3760,6 +3968,7 @@ public static class FeatureForward
 
         // generic
         bool hasTarPassDays = TryGetOptionalInt(model, "generic", "archive_enable_tar_pass_days", out int tarPassDays);
+        bool hasLoopPort = TryGetOptionalInt(model, "generic", "loop_mode_tcp_open_port", out int loopPort);
 
         cfg.Generic = new GenericConfig
         {
@@ -3769,6 +3978,7 @@ public static class FeatureForward
             ArchiveEnableTarPassDays = hasTarPassDays ? tarPassDays : 0,
             LogDir = ResolveConfigPath(configDir, GetRequiredString(model, "generic", "log_dir")),
             StatFileName = ResolveConfigPath(configDir, GetRequiredString(model, "generic", "stat_filename")),
+            LoopModeTcpOpenPort = hasLoopPort ? loopPort : 0,
         };
 
         // archive_enable_tar_pass_days は archive_enable_tar = true の場合必須かつ 1 以上 [251224_VMWE23]
@@ -3789,6 +3999,14 @@ public static class FeatureForward
             if (hasTarPassDays && cfg.Generic.ArchiveEnableTarPassDays < 0)
             {
                 throw new Exception($"APPERROR: TOML integer out of range (0..): generic.archive_enable_tar_pass_days = {cfg.Generic.ArchiveEnableTarPassDays}");
+            }
+        }
+
+        if (hasLoopPort)
+        {
+            if (cfg.Generic.LoopModeTcpOpenPort < 1 || cfg.Generic.LoopModeTcpOpenPort > 65535)
+            {
+                throw new Exception($"APPERROR: TOML integer out of range (1..65535): generic.loop_mode_tcp_open_port = {cfg.Generic.LoopModeTcpOpenPort}");
             }
         }
 
@@ -4278,6 +4496,11 @@ public static class FeatureForward
         /// 統計情報ファイル名です。(フルパス)
         /// </summary>
         public string StatFileName = "";
+
+        /// <summary>
+        /// loop モードの TCP ポート待受番号です。(未指定の場合は 0)
+        /// </summary>
+        public int LoopModeTcpOpenPort;
     }
 
     /// <summary>
