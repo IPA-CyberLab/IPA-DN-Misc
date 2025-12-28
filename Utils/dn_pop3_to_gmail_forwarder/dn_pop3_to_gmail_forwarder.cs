@@ -149,9 +149,26 @@ public class Program
             context.ExitCode = await FeatureForward.RunAsync(options).ConfigureAwait(false);
         });
 
+        var loopCommand = new Command("loop", "Loop mode: run forward mode repeatedly without process restart.");
+        var loopConfigOption = new Option<string>("--config", "Loop mode TOML config file path.") { IsRequired = true };
+        loopCommand.AddOption(loopConfigOption);
+
+        loopCommand.SetHandler(async (InvocationContext context) =>
+        {
+            string configPath = context.ParseResult.GetValueForOption(loopConfigOption) ?? "";
+
+            var options = new FeatureLoop.LoopOptions
+            {
+                ConfigPath = configPath,
+            };
+
+            context.ExitCode = await FeatureLoop.RunAsync(options).ConfigureAwait(false);
+        });
+
         root.AddCommand(helpCommand);
         root.AddCommand(getTokenCommand);
         root.AddCommand(forwardCommand);
+        root.AddCommand(loopCommand);
 
         var checkCommand = new Command("check", "Check mode: validate config without network access.");
         var checkConfigOption = new Option<string>("--config", "Check mode TOML config file path.") { IsRequired = true };

@@ -1,0 +1,90 @@
+﻿===================================================================
+日時: 2025/12/28 16:24:55 (JST)
+開発者によって指示された指示の内容: 251228_SFST8N の実施 (loop モード実装)
+作業内容の概要: loop モード実装とビルド確認
+AI エンジン: GPT-5 (Codex CLI) / 推論レベル: 高
+AI 実行コンピュータ名: pc37
+関連タグ: 251228_SFST8N, 251228_RYJXF4, 251228_SEYD8Q,
+          251218_K3VRU3, 251216_VP33AH
+編集したファイルの一覧:
+- dn_pop3_to_gmail_forwarder.cs
+- feature_forward.cs
+- feature_loop.cs
+実装または変更したクラスやメソッド名の一覧 (複数あってよい):
+- Program.BuildRootCommand
+- FeatureForward.RunLoopAsync
+- FeatureForward.ForwardLogger.ConsumeLoopErrorCount
+- FeatureLoop
+- FeatureLoop.RunAsync
+実装において迷った点 (もしあれば):
+- ループの致命的エラー判定を Error ログ検出に含めるかを検討した。
+参考文献 (複数あってよい):
+- なし
+
+
+1. 事前確認
+- Readme_for_AI.txt に従い、仕様 (全体仕様・目的) と
+  コーディング規約 [251216_VP33AH]、コマンドライン規約
+  [251218_K3VRU3]、指示 ID 251228_SFST8N を確認した。
+
+2. 実装内容
+- ループモード用の FeatureLoop クラスを追加し、
+  コマンドラインの loop サブコマンドを新設した。
+- FeatureForward に RunLoopAsync を実装し、forward と同等の
+  処理を 1 サイクル毎に実行する構成とした。
+- サイクル開始/終了の Info ログと、処理時間 (小数 1 桁秒)
+  の記録を追加した。
+- エラーログ検知のため ForwardLogger に
+  ループ向けカウンタを追加し、サイクル内の Error 発生で
+  致命的エラー判定を行うようにした。
+- 致命的エラー時は指数バックオフ (最大 180 秒) を行い、
+  その理由と詳細を Error ログに 1 行で記録した。
+- 正常時は 1 秒 + 25% 揺らぎの待機を行うようにした。
+
+3. ビルド確認
+- BuildTest.txt に従い dotnet build を実行し、
+  コンパイル成功を確認した。
+
+4. 補足
+- landlock 制約によりコマンド実行は escalated で行った。
+
+
+===================================================================
+日時: 2025/12/28 16:53:05 (JST)
+開発者によって指示された指示の内容: 251228_SVLW7N の実施 (loop モードの設定再読込対応)
+作業内容の概要: ループ毎の設定再読込とログ処理調整を実装しビルド確認
+AI エンジン: GPT-5 (Codex CLI) / 推論レベル: 高
+AI 実行コンピュータ名: pc37
+関連タグ: 251228_SVLW7N, 251228_SUS8DF, 251228_RYJXF4,
+          251216_VP33AH
+編集したファイルの一覧:
+- feature_forward.cs
+実装または変更したクラスやメソッド名の一覧 (複数あってよい):
+- FeatureForward.RunLoopAsync
+- FeatureForward.EnsureLoopCycleStartLog
+実装において迷った点 (もしあれば):
+- log_dir 変更時のサイクル開始ログの出力先の扱いを検討した。
+参考文献 (複数あってよい):
+- なし
+
+
+1. 事前確認
+- 指示 251228_SVLW7N と、仕様 [251228_SUS8DF] の
+  ループモード設定再読込の要件を確認した。
+
+2. 実装内容
+- ループ 1 回転ごとに config を再読み込みするよう
+  RunLoopAsync を改修した。
+- log_dir の変更があれば新しいロガーに切り替え、
+  初回のみ loop mode started ログを出力するようにした。
+- サイクル開始ログとエラーカウント初期化を
+  EnsureLoopCycleStartLog に集約し、例外時も
+  ループ継続判定のためのカウントが取れるようにした。
+
+3. ビルド確認
+- BuildTest.txt に従い dotnet build を実行し、
+  コンパイル成功を確認した。
+
+4. 補足
+- landlock 制約によりコマンド実行は escalated で行った。
+

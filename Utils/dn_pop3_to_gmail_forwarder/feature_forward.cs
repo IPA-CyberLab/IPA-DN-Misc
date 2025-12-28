@@ -130,6 +130,213 @@ public static class FeatureForward
     }
 
     /// <summary>
+    /// loop モードを実行します。[251228_RYJXF4]
+    /// </summary>
+    /// <param name="configPath">設定ファイルパスです。</param>
+    /// <param name="cancel">キャンセル要求です。</param>
+    /// <returns>プロセス戻り値です。(0: 成功 / 1: 失敗)</returns>
+    public static async Task<int> RunLoopAsync(string configPath, CancellationToken cancel = default)
+    {
+        ForwardLogger? logger = null;
+        string currentLogDir = "";
+        bool loopStartLogged = false;
+        Mutex? singleInstanceMutex = null;
+
+        try
+        {
+            if (string.IsNullOrWhiteSpace(configPath))
+            {
+                throw new Exception("APPERROR: --config is required.");
+            }
+
+            string configFullPath = Path.GetFullPath(configPath);
+            singleInstanceMutex = AcquireForwardMutexOrThrow(configFullPath);
+
+            int loopCount = 0;
+            int backoffSeconds = 1;
+            bool hadFatalErrorLastCycle = false;
+
+            while (true)
+            {
+                cancel.ThrowIfCancellationRequested();
+
+                loopCount++;
+
+                long startTick = Environment.TickCount64;
+
+                bool cycleStartLogged = false;
+                bool loopErrorCountReset = false;
+                Exception? cycleException = null;
+                ForwardConfig? config = null;
+
+                try
+                {
+                    // ★ ループ 1 回転ごとに config を再読み込みする [251228_SUS8DF]
+                    config = await LoadConfigAsync(configFullPath, cancel).ConfigureAwait(false);
+
+                    if (logger == null || string.Equals(currentLogDir, config.Generic.LogDir, StringComparison.OrdinalIgnoreCase) == false)
+                    {
+                        logger = new ForwardLogger(config.Generic.LogDir);
+                        currentLogDir = config.Generic.LogDir;
+                    }
+
+                    if (loopStartLogged == false)
+                    {
+                        logger.Info($"loop mode started. config = {config.ConfigFilePath}");
+                        loopStartLogged = true;
+                    }
+
+                    EnsureLoopCycleStartLog(logger, loopCount, ref cycleStartLogged, ref loopErrorCountReset);
+
+                    await RunForwardInternalAsync(config, logger, cancel).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    cycleException = ex;
+
+                    string msg = LibCommon.AppendExceptionDetail("APPERROR: Unhandled exception in forward mode during loop cycle.", ex);
+
+                    if (logger != null)
+                    {
+                        EnsureLoopCycleStartLog(logger, loopCount, ref cycleStartLogged, ref loopErrorCountReset);
+                        logger.Error(msg);
+                    }
+                    else
+                    {
+                        try { ForwardLogger.WriteErrorToConsoleOnly(msg); } catch { }
+                    }
+                }
+
+                if (logger != null)
+                {
+                    EnsureLoopCycleStartLog(logger, loopCount, ref cycleStartLogged, ref loopErrorCountReset);
+                }
+
+                double elapsedSecs = (Environment.TickCount64 - startTick) / 1000.0;
+                string elapsedText = elapsedSecs.ToString("0.0", CultureInfo.InvariantCulture);
+
+                if (logger != null)
+                {
+                    logger.Info($"loop mode cycle finished. count={loopCount}, elapsed_secs={elapsedText}");
+                }
+
+                long cycleErrorCount = logger != null ? logger.ConsumeLoopErrorCount() : 0;
+                bool hasFatalError = cycleException != null || cycleErrorCount > 0;
+
+                if (hasFatalError)
+                {
+                    if (hadFatalErrorLastCycle)
+                    {
+                        backoffSeconds = Math.Min(backoffSeconds * 2, 180);
+                    }
+                    else
+                    {
+                        backoffSeconds = 1;
+                    }
+
+                    hadFatalErrorLastCycle = true;
+
+                    string reason = cycleException != null
+                        ? LibCommon.AppendExceptionDetail("fatal error occurred in forward cycle.", cycleException)
+                        : $"fatal error occurred in forward cycle. ErrorLogCount={cycleErrorCount}";
+
+                    if (logger != null)
+                    {
+                        logger.Error($"loop mode will sleep {backoffSeconds} seconds due to fatal error. {reason}");
+                    }
+                    else
+                    {
+                        try { ForwardLogger.WriteErrorToConsoleOnly($"APPERROR: loop mode will sleep {backoffSeconds} seconds due to fatal error. {reason}"); } catch { }
+                    }
+
+                    await Task.Delay(TimeSpan.FromSeconds(backoffSeconds), cancel).ConfigureAwait(false);
+                }
+                else
+                {
+                    hadFatalErrorLastCycle = false;
+                    backoffSeconds = 1;
+
+                    double jitter = 0.75 + (Random.Shared.NextDouble() * 0.5);
+                    int delayMsecs = (int)Math.Round(1000 * jitter);
+                    if (delayMsecs <= 0) delayMsecs = 1;
+
+                    await Task.Delay(delayMsecs, cancel).ConfigureAwait(false);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Ctrl+C 等で停止した場合はエラー扱いとする
+            if (logger != null)
+            {
+                logger.Error("APPERROR: Canceled.");
+            }
+            else
+            {
+                try { ForwardLogger.WriteErrorToConsoleOnly("APPERROR: Canceled."); } catch { }
+            }
+            return 1;
+        }
+        catch (Exception ex)
+        {
+            // loop モードでは、Error ログ形式でユーザーに通知する (可能ならログファイルにも保存する)
+            string msg = ex.Message ?? "Unknown error.";
+            if (msg.StartsWith("APPERROR:", StringComparison.OrdinalIgnoreCase) == false)
+            {
+                msg = "APPERROR: " + msg;
+            }
+
+            if (logger != null)
+            {
+                logger.Error(msg);
+            }
+            else
+            {
+                try { ForwardLogger.WriteErrorToConsoleOnly(msg); } catch { }
+            }
+
+            return 1;
+        }
+        finally
+        {
+            if (singleInstanceMutex != null)
+            {
+                try { singleInstanceMutex.ReleaseMutex(); } catch { }
+                try { singleInstanceMutex.Dispose(); } catch { }
+            }
+        }
+    }
+
+    /// <summary>
+    /// loop サイクル開始ログの出力とエラーカウント初期化を行ないます。
+    /// </summary>
+    /// <param name="logger">ロガーです。</param>
+    /// <param name="loopCount">ループ回数です。</param>
+    /// <param name="startLogged">開始ログ出力済みフラグです。</param>
+    /// <param name="errorCountReset">エラーカウント初期化済みフラグです。</param>
+    private static void EnsureLoopCycleStartLog(ForwardLogger logger, int loopCount, ref bool startLogged, ref bool errorCountReset)
+    {
+        if (logger == null) throw new ArgumentNullException(nameof(logger));
+
+        if (errorCountReset == false)
+        {
+            // ★ ループ 1 回分の Error ログカウントをリセットしてから実行する
+            logger.ConsumeLoopErrorCount();
+            errorCountReset = true;
+        }
+
+        if (startLogged == false)
+        {
+            logger.Info($"loop mode cycle started. count={loopCount}");
+            startLogged = true;
+        }
+    }
+
+    /// <summary>
     /// check モードを実行します。[251222_ZYMQ4U]
     /// </summary>
     /// <param name="configPath">設定ファイルパスです。</param>
@@ -4234,6 +4441,8 @@ public static class FeatureForward
     {
         private readonly string _logDir;
         private long _errorCount;
+        // ループモード向けの 1 サイクル内エラーカウントです。
+        private long _loopErrorCount;
 
         /// <summary>
         /// コンストラクタです。
@@ -4273,6 +4482,15 @@ public static class FeatureForward
         }
 
         /// <summary>
+        /// ループモード向けのエラーカウントを取得し、リセットします。
+        /// </summary>
+        /// <returns>リセット前のエラーカウントです。</returns>
+        public long ConsumeLoopErrorCount()
+        {
+            return Interlocked.Exchange(ref _loopErrorCount, 0);
+        }
+
+        /// <summary>
         /// Error を標準エラー出力のみに出力します。(ログ保存なし)
         /// </summary>
         /// <param name="message">メッセージです。</param>
@@ -4289,6 +4507,7 @@ public static class FeatureForward
             if (isError)
             {
                 Interlocked.Increment(ref _errorCount);
+                Interlocked.Increment(ref _loopErrorCount);
             }
 
             // まずコンソールへ (仕様: Info は stdout, Error は stderr)
