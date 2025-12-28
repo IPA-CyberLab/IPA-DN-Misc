@@ -5089,7 +5089,7 @@ public sealed class MailMetaData
 
     public string GetBodyAll()
     {
-        return PlainTextBody + " " + HtmlBody;
+        return PlainTextBody + " " + HtmlBody + " " + HtmlBodyToPlainText;
     }
 
     /// <summary>
