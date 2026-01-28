@@ -9,6 +9,23 @@ export DEBIAN_FRONTEND=noninteractive
 cat <<\EOF > /etc/profile.d/dn_benri_aliases.sh
 # by dnobori
 
+# プロンプトの色をカラフルに
+__my_customized_prompt_command() {
+  local exit=$?
+  local sym_color="\[\e[1;37m\]"
+  if [ $exit -ne 0 ]; then
+    sym_color="\[\e[1;31m\]"
+  fi
+
+  PS1="\[\e[1;34m\][\u@\h \[\e[1;36m\]\w\[\e[1;34m\]]${sym_color}\\$\[\e[0m\] "
+}
+PROMPT_COMMAND=__my_customized_prompt_command
+
+# 「青」を明るく
+printf '\e]4;4;rgb:00/7a/ff\a'
+printf '\e]4;12;rgb:6a/b8/ff\a'
+
+
 # テスト
 alias dn_test1='echo Test1 OK!'
 
