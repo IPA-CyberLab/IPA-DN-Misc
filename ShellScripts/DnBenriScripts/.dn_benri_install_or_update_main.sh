@@ -22,8 +22,8 @@ __my_customized_prompt_command() {
 PROMPT_COMMAND=__my_customized_prompt_command
 
 # 「青」を明るく
-printf '\e]4;4;rgb:00/7a/ff\a'
-printf '\e]4;12;rgb:6a/b8/ff\a'
+#printf '\e]4;4;rgb:00/7a/ff\a'
+#printf '\e]4;12;rgb:6a/b8/ff\a'
 
 
 # テスト
