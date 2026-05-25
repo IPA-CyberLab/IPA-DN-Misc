@@ -5046,9 +5046,15 @@ public static class FeatureForward
 
                     Stream baseStream = _tcp.GetStream();
 
+                    baseStream.ReadTimeout = _config.TcpRecvTimeoutSecs * 1000;
+                    baseStream.WriteTimeout = _config.TcpSendTimeoutSecs * 1000;
+
                     if (_config.SslMode == Pop3SslMode.Full)
                     {
                         baseStream = await WrapSslAsync(baseStream, _config.Hostname, _config.SslVerifyServerCert, _config.SslTrustedStaticHashList, cancel).ConfigureAwait(false);
+
+                        baseStream.ReadTimeout = _config.TcpRecvTimeoutSecs * 1000;
+                        baseStream.WriteTimeout = _config.TcpSendTimeoutSecs * 1000;
                     }
 
                     SetStream(baseStream);
@@ -5064,6 +5070,9 @@ public static class FeatureForward
 
                         Stream sslStream = await WrapSslAsync(_stream!, _config.Hostname, _config.SslVerifyServerCert, _config.SslTrustedStaticHashList, cancel).ConfigureAwait(false);
                         SetStream(sslStream);
+
+                        sslStream.ReadTimeout = _config.TcpRecvTimeoutSecs * 1000;
+                        sslStream.WriteTimeout = _config.TcpSendTimeoutSecs * 1000;
                     }
 
                     return;
